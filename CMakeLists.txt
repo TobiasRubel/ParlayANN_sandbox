@@ -31,6 +31,7 @@ target_include_directories(ParlayANN INTERFACE
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 
 add_subdirectory(algorithms)
+add_subdirectory(analysis)
 #add_subdirectory(data_tools)
 #add_subdirectory(range_search)
 

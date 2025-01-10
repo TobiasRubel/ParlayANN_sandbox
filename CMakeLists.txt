@@ -21,6 +21,8 @@ if(NOT parlaylib_POPULATED)
   add_subdirectory(${parlaylib_SOURCE_DIR} EXCLUDE_FROM_ALL)
 endif()
 
+set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
+
 # Set module path
 list(APPEND CMAKE_MODULE_PATH "${ParlayANN_SOURCE_DIR}/cmake")
 

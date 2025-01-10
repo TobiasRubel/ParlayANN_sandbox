@@ -1,6 +1,8 @@
 set(TEST_FILES
     custom_beam_search_unit.cpp
 	centrality.cpp
+    graph_analysis.cpp
+    graph_sparsify.cpp
 )
 
 foreach(TEST_FILE ${TEST_FILES})
@@ -9,5 +11,8 @@ foreach(TEST_FILE ${TEST_FILES})
 	target_link_libraries(${TEST_NAME} parlay ParlayANN)
 endforeach()
 
-#include_directories(${CMAKE_SOURCE_DIR}/parlaylib/include)
-#include_directories(${CMAKE_SOURCE_DIR}/algorithms)
+#add_executable(graph_analysis graph_analysis.cpp)
+#  target_link_libraries(graph_analysis PRIVATE parlay ParlayANN)
+#
+#add_executable(graph_sparsify graph_sparsify.cpp)
+#  target_link_libraries(graph_sparsify PRIVATE parlay ParlayANN)

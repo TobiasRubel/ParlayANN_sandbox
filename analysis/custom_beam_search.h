@@ -13,11 +13,6 @@
 #include "utils/graph.h"
 #include "vamana/neighbors.h"
 
-using index_type = uint32_t;
-using value_type = float;
-using point_type = parlayANN::Euclidian_Point<value_type>;
-using point_range_type = parlayANN::PointRange<point_type>;
-
 // Variation of beam search to allow custom functions called on vertices/edges
 // PointFunc is called on vertices when they are visited (ie. expanded)
 // EdgeFunc is called on vertices when they are added to the frontier (ie. seen)
@@ -32,6 +27,8 @@ custom_beam_search(const GT &G,
                      const QPoint qp, const QPointRange &Q_Points,
                      const parlay::sequence<indexType> starting_points,
                      const parlayANN::QueryParams &QP,
+                     PointFunc&& point_func,
+                     EdgeFunc&& edge_func,
                      bool use_filtering = false
                      ) {
   using dtype = typename Point::distanceType;
@@ -69,7 +66,7 @@ custom_beam_search(const GT &G,
   for (auto q : starting_points) {
     frontier.push_back(id_dist(q, Points[q].distance(p)));
     has_been_seen(q);
-    //PointFunc(q);
+    point_func(q);
   }
   std::sort(frontier.begin(), frontier.end(), less);
 
@@ -117,7 +114,7 @@ custom_beam_search(const GT &G,
     visited.insert(position, current);
     num_visited++;
     bool frontier_full = frontier.size() == beamSize;
-    PointFunc(current.first);
+    point_func(current.first);
 
     // if using filtering based on lower quality distances measure, then maintain the average
     // of low quality distance to the last point in the frontier (if frontier is full)
@@ -161,7 +158,7 @@ custom_beam_search(const GT &G,
       // skip if frontier not full and distance too large
       if (dist >= cutoff) continue;
       candidates.push_back(std::pair{a, dist});
-      EdgeFunc(current.first, a);
+      edge_func(current.first, a);
     }
     // If candidates insufficently full then skip rest of step until sufficiently full.
     // This improves performance for higher accuracies (e.g. beam sizes of 100+)

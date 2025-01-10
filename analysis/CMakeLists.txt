@@ -1,5 +1,6 @@
 set(TEST_FILES
     custom_beam_search_unit.cpp
+	centrality.cpp
 )
 
 foreach(TEST_FILE ${TEST_FILES})

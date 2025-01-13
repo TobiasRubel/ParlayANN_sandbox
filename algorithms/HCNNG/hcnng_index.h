@@ -28,7 +28,10 @@
 #include <set>
 
 #include "../utils/graph.h"
+#include "2hashClusterEdge.h"
 #include "clusterEdge.h"
+#include "randomclusterEdge.h"
+#include "simhashClusterEdge.h"
 #include "parlay/parallel.h"
 #include "parlay/primitives.h"
 #include "parlay/random.h"
@@ -253,16 +256,58 @@ struct hcnng_index {
     G[p].update_neighbors(new_nbhs);
   }
 
+  
+
   void build_index(GraphI &G, PR &Points, long cluster_rounds,
-                   long cluster_size, long MSTDeg) {
-    cluster<Point, PointRange, indexType> C;
-    C.multiple_clustertrees(G, Points, cluster_size, cluster_rounds, MSTk,
-                            MSTDeg);
+                   long cluster_size, long MSTDeg, long pivot_type) {
+    switch(pivot_type) {
+      case 0: {
+        std::cout << "Using default pivot method" << std::endl;
+        cluster<Point, PointRange, indexType> C;
+        C.multiple_clustertrees(G, Points, cluster_size, cluster_rounds, MSTk,
+                                MSTDeg);
+        break;
+      }
+      case 1: {
+        std::cout << "Using 2-hash pivot method" << std::endl;
+        hashcluster2<Point, PointRange, indexType> C;
+        C.multiple_clustertrees(G, Points, cluster_size, cluster_rounds, MSTk,
+                                MSTDeg);
+        break;
+      }
+      case 2: {
+        std::cout << "Using random partition pivot method" << std::endl;
+        randompartition<Point, PointRange, indexType> C;
+        C.multiple_clustertrees(G, Points, cluster_size, cluster_rounds, MSTk, MSTDeg);
+        break;
+      }
+      case 3: {
+        std::cout << "Using simhash pivot method" << std::endl;
+        simhashcluster<Point, PointRange, indexType> C;
+        C.multiple_clustertrees(G, Points, cluster_size, cluster_rounds, MSTk,
+                                MSTDeg);
+        break;
+      }
+      case 4: {
+        std::cout << "Using hybrid of default and random... This is a test not a method." << std::endl;
+        cluster<Point, PointRange, indexType> C;
+        C.multiple_clustertrees(G, Points, cluster_size, cluster_rounds-5, MSTk,
+                                MSTDeg);
+        randompartition<Point, PointRange, indexType> C2;
+        C2.multiple_clustertrees(G, Points, cluster_size, 5, MSTk, MSTDeg);
+        break;
+      }
+      default: {
+        std::cerr << "Invalid pivot type. Please use -pivot_type XX:\n0: default\n1: 1-vector simhash\n2: random partition\n3: arbitrary simhash bucketing" << std::endl;
+        break;
+      }
+    }
     remove_all_duplicates(G);
     // TODO: enable optional pruning (what is below now works, but
     // should be connected cleanly)
-    // parlay::parallel_for(0, G.size(), [&] (size_t i){robustPrune(i, Points,
-    // G, 1.1);});
+    std::cout << "pruning..." << std::endl;
+    parlay::parallel_for(0, G.size(), [&] (size_t i){robustPrune(i, Points,
+    G, 1.1);});
   }
 };
 

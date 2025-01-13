@@ -89,6 +89,7 @@ int main(int argc, char* argv[]) {
   if(R<0) P.badArgument();
   long L = P.getOptionIntValue("-L", 0);
   if(L<0) P.badArgument();
+  long pivot_type = P.getOptionIntValue("-pivot_type", 0);
   long MST_deg = P.getOptionIntValue("-mst_deg", 0);
   if(MST_deg < 0) P.badArgument();
   long num_clusters = P.getOptionIntValue("-num_clusters", 0);
@@ -123,7 +124,7 @@ int main(int argc, char* argv[]) {
   std::string df = std::string(dfc);
   std::string tp = std::string(vectype);
 
-  BuildParams BP = BuildParams(R, L, alpha, num_passes, num_clusters, cluster_size, MST_deg, delta, verbose, quantize_build, radius, radius_2, self, range, single_batch, Q, trim, rerank_factor);
+  BuildParams BP = BuildParams(R, L, alpha, num_passes, num_clusters, cluster_size, MST_deg, delta, pivot_type, verbose, quantize_build, radius, radius_2, self, range, single_batch, Q, trim, rerank_factor);
   long maxDeg = BP.max_degree();
 
   if((tp != "uint8") && (tp != "int8") && (tp != "float")){

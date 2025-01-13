@@ -48,7 +48,7 @@ void ANN(Graph<indexType> &G, long k, BuildParams &BP,
   double idx_time;
   if(!graph_built){
     findex I;
-    I.build_index(G, Points, BP.num_clusters, BP.cluster_size, BP.MST_deg);
+    I.build_index(G, Points, BP.num_clusters, BP.cluster_size, BP.MST_deg, BP.pivot_type);
     idx_time = t.next_time();
   } else{idx_time=0;}
   std::string name = "HCNNG";

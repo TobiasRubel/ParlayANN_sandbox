@@ -1,0 +1,16 @@
+g++ -DSTATS -DHOMEGROWN -pthread -mcx16 -O3 -std=c++17 -march=native -DNDEBUG -I . -I ../../parlaylib/include/ -include neighbors.h -o neighbors ../bench/neighborsTime.C -DHOMEGROWN -pthread -ldl -L/usr/local/lib -ljemalloc 
+In file included from ./simhashClusterEdge.h:32,
+                 from ./hcnng_index.h:34,
+                 from ./neighbors.h:35,
+                 from <command-line>:
+./../utils/simhash.h: In constructor ‘simhash<Point, PointRange, indexType>::simhash(indexType, indexType)’:
+./../utils/simhash.h:23:38: error: ‘i’ was not declared in this scope
+   23 |         parlay::random_generator gen(i);
+      |                                      ^
+./../utils/simhash.h:28:10: error: expected ‘)’ before ‘;’ token
+   28 |         };
+      |          ^
+./../utils/simhash.h:25:47: note: to match this ‘(’
+   25 |         auto random_vectors = parlay::tabulate(d*b, [&](size_t i) {
+      |                                               ^
+make: *** [../bench/MakeBench:17: neighbors] Error 1

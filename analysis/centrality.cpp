@@ -74,7 +74,6 @@ int main(int argc, char* argv[]) {
                     }
                 }
                 if (slot == -1) return;
-                if (i > j) std::swap(i, j);
                 centrality[i * graph.max_degree() + slot]++;
             }
         );
@@ -86,12 +85,11 @@ int main(int argc, char* argv[]) {
     auto edge_lengths = parlay::tabulate<value_t>(max_edges,
         [&] (size_t i) -> value_t {
             if (i % graph.max_degree() >= graph[i / graph.max_degree()].size()) return -1;
-            else if (i / graph.max_degree() > graph[i / graph.max_degree()][i % graph.max_degree()]) return -1;
             else return points[graph[i / graph.max_degree()][i % graph.max_degree()]].distance(points[i / graph.max_degree()]);
         }
     );
 
-    // Filter out invalid and duplicate edges
+    // Filter out nonexistent edges
     auto zipped = parlay::delayed_tabulate<std::pair<value_t, uint32_t>>(max_edges,
         [&] (size_t i) -> std::pair<value_t, uint32_t> {
             return std::make_pair(edge_lengths[i], centrality[i].load());

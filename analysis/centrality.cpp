@@ -105,8 +105,11 @@ int main(int argc, char* argv[]) {
     std::cout << "Done" << std::endl;
 
     // Output edge lengths and centralities to file
+    std::ofstream o_stream(o_file, std::ios::binary);
+    uint32_t num_edges = filtered.size();
+    o_stream.write(reinterpret_cast<char*>(&num_edges), sizeof(num_edges));
     auto chars = parlay::to_chars(filtered);
-    parlay::chars_to_file(chars, o_file);
+    parlay::chars_to_stream(chars, o_stream);
     std::cout << "Results written to " << o_file << std::endl;
  
     return 0;

@@ -32,6 +32,7 @@
 #include "clusterEdge.h"
 #include "randomclusterEdge.h"
 #include "simhashClusterEdge.h"
+#include "fixedKball.h"
 #include "parlay/parallel.h"
 #include "parlay/primitives.h"
 #include "parlay/random.h"
@@ -145,7 +146,15 @@ struct hcnng_index {
     });
   }
 
-  // parameters dim and K are just to interface with the cluster tree code
+  static void star(GraphI &G, PR &Points,
+                   parlay::sequence<size_t> &active_indices, long MSTDeg) {
+    auto root = active_indices[0];
+    for (size_t i = 1; i < active_indices.size(); i++) {
+      //G[root].append_neighbor(active_indices[i]);
+      G[active_indices[i]].append_neighbor(root);
+    }
+  }
+
   static void MSTk(GraphI &G, PR &Points,
                    parlay::sequence<size_t> &active_indices, long MSTDeg) {
     // preprocessing for Kruskal's
@@ -256,15 +265,13 @@ struct hcnng_index {
     G[p].update_neighbors(new_nbhs);
   }
 
-  
-
   void build_index(GraphI &G, PR &Points, long cluster_rounds,
                    long cluster_size, long MSTDeg, long pivot_type) {
     switch(pivot_type) {
       case 0: {
         std::cout << "Using default pivot method" << std::endl;
         cluster<Point, PointRange, indexType> C;
-        C.multiple_clustertrees(G, Points, cluster_size, cluster_rounds, MSTk,
+        C.multiple_clustertrees(G, Points, cluster_size, cluster_rounds, star,
                                 MSTDeg);
         break;
       }
@@ -297,6 +304,13 @@ struct hcnng_index {
         C2.multiple_clustertrees(G, Points, cluster_size, 5, MSTk, MSTDeg);
         break;
       }
+      case 5: {
+        std::cout << "Using fixed k-ball pivot method" << std::endl;
+        kballcluster<Point, PointRange, indexType> C;
+        C.multiple_clustertrees(G, Points, cluster_size, cluster_rounds, MSTk,
+                                MSTDeg);
+        break;
+      }
       default: {
         std::cerr << "Invalid pivot type. Please use -pivot_type XX:\n0: default\n1: 1-vector simhash\n2: random partition\n3: arbitrary simhash bucketing" << std::endl;
         break;
@@ -305,7 +319,7 @@ struct hcnng_index {
     remove_all_duplicates(G);
     // TODO: enable optional pruning (what is below now works, but
     // should be connected cleanly)
-    std::cout << "pruning..." << std::endl;
+    // std::cout << "pruning..." << std::endl;
     parlay::parallel_for(0, G.size(), [&] (size_t i){robustPrune(i, Points,
     G, 1.1);});
   }

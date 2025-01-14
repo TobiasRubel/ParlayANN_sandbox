@@ -39,7 +39,7 @@ namespace parlayANN {
 template<typename Point, typename PointRange, typename indexType>
 void ANN(Graph<indexType> &G, long k, BuildParams &BP,
          PointRange &Query_Points,
-         groundTruth<indexType> GT, char *res_file,
+         groundTruth<indexType> GT, char *res_file, char* exp_prefix,
          bool graph_built, PointRange &Points) {
 
   parlay::internal::timer t("ANN"); 
@@ -57,7 +57,7 @@ void ANN(Graph<indexType> &G, long k, BuildParams &BP,
   Graph_ G_(name, params, G.size(), avg_deg, max_deg, idx_time);
   G_.print();
   if(Query_Points.size() != 0)
-    search_and_parse(G_, G, Points, Query_Points, GT, res_file, k, BP.verbose);
+    search_and_parse(G_, G, Points, Query_Points, GT, res_file, exp_prefix, k, BP.verbose);
 }
 
 } // end namespace

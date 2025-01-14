@@ -127,32 +127,33 @@ nn_result checkRecall(const Graph<indexType> &G,
   return N;
 }
 
-void write_to_csv(std::string csv_filename, parlay::sequence<float> buckets,
+void write_to_csv(std::string csv_filename, std::string exp_prefix, parlay::sequence<float> buckets,
                   parlay::sequence<nn_result> results, Graph_ G) {
   csvfile csv(csv_filename);
-  csv << "GRAPH"
-      << "Parameters"
-      << "Size"
-      << "Build time"
-      << "Avg degree"
-      << "Max degree" << endrow;
-  csv << G.name << G.params << G.size << G.time << G.avg_deg << G.max_deg
-      << endrow;
-  csv << endrow;
-  csv << "Num queries"
-      << "Target recall"
-      << "Actual recall"
-      << "QPS"
-      << "Average Cmps"
-      << "Tail Cmps"
-      << "Average Visited"
-      << "Tail Visited"
-      << "k"
-      << "Q"
-      << "cut" << endrow;
+  //csv << "GRAPH"
+  //    << exp_prefix
+  //    << "Parameters"
+  //    << "Size"
+  //    << "Build time"
+  //    << "Avg degree"
+  //    << "Max degree" << endrow;
+  //csv << G.name << G.params << G.size << G.time << G.avg_deg << G.max_deg
+  //    << endrow;
+  //csv << endrow;
+  //csv << "Num queries"
+  //    << "Target recall"
+  //    << "Actual recall"
+  //    << "QPS"
+  //    << "Average Cmps"
+  //    << "Tail Cmps"
+  //    << "Average Visited"
+  //    << "Tail Visited"
+  //    << "k"
+  //    << "Q"
+  //    << "cut" << endrow;
   for (int i = 0; i < results.size(); i++) {
     nn_result N = results[i];
-    csv << N.num_queries << buckets[i] << N.recall << N.QPS << N.avg_cmps
+    csv << exp_prefix << N.num_queries << buckets[i] << N.recall << N.QPS << N.avg_cmps
         << N.tail_cmps << N.avg_visited << N.tail_visited << N.k << N.beamQ
         << N.cut << endrow;
   }
@@ -175,10 +176,10 @@ void search_and_parse(Graph_ G_,
                       Graph<indexType> &G,
                       PointRange &Base_Points,
                       PointRange &Query_Points,
-                      groundTruth<indexType> GT, char* res_file, long k,
+                      groundTruth<indexType> GT, char* res_file, char* exp_prefix, long k,
                       bool verbose = false,
                       long fixed_beam_width = 0) {
-  search_and_parse(G_, G, Base_Points, Query_Points, Base_Points, Query_Points, Base_Points, Query_Points, GT, res_file, k, false, 0u, verbose, fixed_beam_width);
+  search_and_parse(G_, G, Base_Points, Query_Points, Base_Points, Query_Points, Base_Points, Query_Points, GT, res_file, exp_prefix, k, false, 0u, verbose, fixed_beam_width);
 }
 
 template<typename PointRange, typename QPointRange, typename QQPointRange, typename indexType>
@@ -190,7 +191,7 @@ void search_and_parse(Graph_ G_,
                       QPointRange &Q_Query_Points,
                       QQPointRange &QQ_Base_Points,
                       QQPointRange &QQ_Query_Points,
-                      groundTruth<indexType> GT, char* res_file, long k,
+                      groundTruth<indexType> GT, char* res_file, char* exp_prefix, long k,
                       bool random = true,
                       indexType start_point = 0,
                       bool verbose = false,
@@ -265,7 +266,7 @@ void search_and_parse(Graph_ G_,
       auto [res, ret_buckets] = parse_result(results, buckets);
       std::cout << std::endl;
       if (res_file != NULL)
-        write_to_csv(std::string(res_file), ret_buckets, res, G_);
+        write_to_csv(std::string(res_file), std::string(exp_prefix), ret_buckets, res, G_);
     }
   }
 }

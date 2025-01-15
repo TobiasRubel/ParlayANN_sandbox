@@ -22,7 +22,7 @@ using point_range_t = parlayANN::PointRange<point_t>;
 int main(int argc, char* argv[]) {
     char g_file[] = "/ssd1/anndata/ANNbench_/data/sift/graphs/sift_vamana_R32_L64_alpha1.2_k10_nthreads64.graph";
     char p_file[] = "/ssd1/anndata/ANNbench_/data/sift/sift_base.fbin";
-    char o_file[] = "centrality.bin";
+    char o_file[] = "../../output/centrality.bin";
     const size_t num_queries = 10000;
 
     std::cout << "Loading graph from " << g_file << std::endl;

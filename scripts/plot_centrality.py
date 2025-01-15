@@ -11,6 +11,8 @@ with open(in_path, "rb") as f:
     print(f"Number of edges: {num_edges}")
 
     print(f"Reading data...")
+    sources = np.frombuffer(f.read(num_edges * 4), dtype=np.uint32)
+    targets = np.frombuffer(f.read(num_edges * 4), dtype=np.uint32)
     distances = np.frombuffer(f.read(num_edges * 4), dtype=np.float32)
     centralities = np.frombuffer(f.read(num_edges * 4), dtype=np.uint32)
 

@@ -91,21 +91,11 @@ int main(int argc, char* argv[]) {
 
     // Filter out nonexistent edges
     auto iota = parlay::iota(max_edges);
-    auto filtered = parlay::filter(iota,
-        [&] (size_t i) {
-            return edge_lengths[i] != -1;
-        }
-    );
-    auto filtered_distances = parlay::tabulate<value_t>(filtered.size(),
-        [&] (size_t i) {
-            return edge_lengths[filtered[i]];
-        }
-    );
-    auto filtered_centralities = parlay::tabulate<uint32_t>(filtered.size(),
-        [&] (size_t i) {
-            return centrality[filtered[i]].load();
-        }
-    );
+    auto filtered = parlay::filter(iota, [&] (size_t i) { return edge_lengths[i] != -1; });
+    auto filtered_sources = parlay::tabulate<index_t>(filtered.size(), [&] (size_t i) { return filtered[i] / graph.max_degree(); });
+    auto filtered_targets = parlay::tabulate<index_t>(filtered.size(), [&] (size_t i) { return graph[filtered[i] / graph.max_degree()][filtered[i] % graph.max_degree()]; });
+    auto filtered_distances = parlay::tabulate<value_t>(filtered.size(), [&] (size_t i) { return edge_lengths[filtered[i]]; });
+    auto filtered_centralities = parlay::tabulate<uint32_t>(filtered.size(), [&] (size_t i) { return centrality[filtered[i]].load(); });
     std::cout << "Done" << std::endl;
     std::cout << "Number of filtered edges: " << filtered.size() << std::endl;
 
@@ -113,6 +103,8 @@ int main(int argc, char* argv[]) {
     std::ofstream o_stream(o_file, std::ios::binary);
     uint32_t num_edges = filtered.size();
     o_stream.write(reinterpret_cast<char*>(&num_edges), sizeof(num_edges));
+    o_stream.write(reinterpret_cast<char*>(filtered_sources.begin()), num_edges * sizeof(index_t));
+    o_stream.write(reinterpret_cast<char*>(filtered_targets.begin()), num_edges * sizeof(index_t));
     o_stream.write(reinterpret_cast<char*>(filtered_distances.begin()), num_edges * sizeof(value_t));
     o_stream.write(reinterpret_cast<char*>(filtered_centralities.begin()), num_edges * sizeof(uint32_t));
     std::cout << "Results written to " << o_file << std::endl;

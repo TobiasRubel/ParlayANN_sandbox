@@ -2,8 +2,8 @@ import struct
 import numpy as np
 import matplotlib.pyplot as plt
 
-in_path = "../output/centrality.bin"
-out_path = "../output/centrality.png"
+in_path = "centrality.bin"
+out_path = "centrality.png"
 
 with open(in_path, "rb") as f:
     num_edges = struct.unpack("I", f.read(4))[0]
@@ -18,7 +18,7 @@ with open(in_path, "rb") as f:
 
 print(f"Plotting data...")
 plt.figure(figsize=(10, 6))
-plt.scatter(distances, centralities, size=6, color='blue', edgecolors='none', alpha=0.2)
+plt.scatter(distances, centralities, s=6, c='blue', edgecolors='none', alpha=0.2)
 plt.title("Edge Length vs Usage Frequency")
 plt.xlabel("Edge Length")
 plt.ylabel("Centrality")

@@ -1,9 +1,27 @@
 import struct
 import numpy as np
 import matplotlib.pyplot as plt
+import argparse
 
-in_path = "centrality.bin"
-out_path = "centrality_avg.png"
+parser = argparse.ArgumentParser(description="Generate a line plot of average centrality for each edge length from a binary file.")
+parser.add_argument(
+    "--in-file",
+    "-i",
+    type=str,
+    default="centrality.bin",
+    help="Path to the input binary file (default: centrality.bin)."
+)
+parser.add_argument(
+    "--out-file",
+    "-o",
+    type=str,
+    default="centrality_avg.png",
+    help="Path to save the output plot image (default: centrality_avg.png)."
+)
+
+args = parser.parse_args()
+in_path = args.in_file
+out_path = args.out_file
 
 with open(in_path, "rb") as f:
     num_edges = struct.unpack("I", f.read(4))[0]

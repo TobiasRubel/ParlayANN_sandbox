@@ -1,9 +1,27 @@
 import struct
 import numpy as np
 import matplotlib.pyplot as plt
+import argparse
 
-in_path = "centrality.bin"
-out_path = "edge_lengths.png"
+parser = argparse.ArgumentParser(description="Generate a histogram of edge lengths from a binary file.")
+parser.add_argument(
+    "--in-file",
+    "-i",
+    type=str,
+    default="centrality.bin",
+    help="Path to the input binary file (default: centrality.bin)."
+)
+parser.add_argument(
+    "--out-file",
+    "-o",
+    type=str,
+    default="edge_lengths.png",
+    help="Path to save the output plot image (default: edge_lengths.png)."
+)
+
+args = parser.parse_args()
+in_path = args.in_file
+out_path = args.out_file
 
 with open(in_path, "rb") as f:
     num_edges = struct.unpack("I", f.read(4))[0]

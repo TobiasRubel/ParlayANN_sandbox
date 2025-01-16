@@ -22,6 +22,56 @@ using AdjGraph = parlay::sequence<parlay::sequence<unsigned int>>;
 using namespace parlayANN;
 
 template <class PR>
+void Meld(commandLine& P, PR& Points) {
+  char* target_path = P.getOptionValue("-target_path");
+  char* source_path = P.getOptionValue("-source_path");
+  using indexType = uint32_t;
+  Graph<indexType> Target(target_path);
+  Graph<indexType> Source(source_path);
+  Graph<indexType> Output(Target.max_degree(), Target.size());
+
+  // For each point, replace the k longest edges in the target with k
+  // longest edges in the souce.
+  long max_to_replace = P.getOptionLongValue("-k", 1);
+  parlay::parallel_for(0, Target.size(), [&] (size_t i) {
+    using edge = std::pair<float, uint32_t>;
+    std::vector<edge> target_edges;
+    auto point = Points[i];
+    auto edges = Target[i];
+    for (size_t j=0; j < edges.size(); ++j) {
+      auto neighbor = edges[j];
+      auto dist = point.distance(Points[neighbor]);
+      target_edges.push_back(std::make_pair(dist, neighbor));
+    }
+    std::sort(target_edges.begin(), target_edges.end());
+
+    std::vector<edge> source_edges;
+    auto s_edges = Source[i];
+    for (size_t j=0; j < s_edges.size(); ++j) {
+      auto neighbor = s_edges[j];
+      auto dist = point.distance(Points[neighbor]);
+      source_edges.push_back(std::make_pair(dist, neighbor));
+    }
+    std::sort(source_edges.begin(), source_edges.end());
+
+    long to_replace = std::min(static_cast<long>(std::min(target_edges.size(),
+          source_edges.size())), max_to_replace);
+
+    for (size_t j=0; j<to_replace; ++j) {
+      target_edges[target_edges.size() - j - 1] =
+        source_edges[source_edges.size() - j - 1]; 
+    }
+
+    for (auto [dist, ngh] : target_edges) {
+      Output[i].append_neighbor(ngh);
+    }
+  });
+
+  char* out_path = P.getOptionValue("-out_path");
+  Output.save(out_path);
+}
+
+template <class PR>
 void DropEdges(commandLine& P, PR& Points) {
   char* gpath = P.getOptionValue("-graph_path");
   using indexType = uint32_t;
@@ -93,6 +143,17 @@ void DropEdges(commandLine& P, PR& Points) {
   D.save(out_path);
 }
 
+template <class PR>
+void Run(commandLine& P, PR& Points) {
+  auto taskstr = std::string(P.getOptionValue("-task"));
+  if (taskstr == "drop_edges") {
+    DropEdges(P, Points);
+  } else if (taskstr == "meld") {
+    std::cout << "Running meld" << std::endl;
+    Meld(P, Points);
+  }
+}
+
 int main(int argc, char* argv[]) {
   commandLine P(
       argc, argv,
@@ -108,12 +169,28 @@ int main(int argc, char* argv[]) {
       using Point = Euclidian_Point<float>;
       using PR = PointRange<Point>;
       PR Points(iFile);
-      DropEdges(P, Points);
+      Run(P, Points);
     } else if (df == "mips") {
       using Point = Mips_Point<float>;
       using PR = PointRange<Point>;
       PR Points(iFile);
-      DropEdges(P, Points);
+      Run(P, Points);
+    } else {
+      std::cout << "Unknown df" << std::endl;
+      exit(-1);
+    }
+  }
+  if (tp == "uint8") {
+    if (df == "Euclidian") {
+      using Point = Euclidian_Point<uint8_t>;
+      using PR = PointRange<Point>;
+      PR Points(iFile);
+      Run(P, Points);
+    } else if (df == "mips") {
+      using Point = Mips_Point<uint8_t>;
+      using PR = PointRange<Point>;
+      PR Points(iFile);
+      Run(P, Points);
     } else {
       std::cout << "Unknown df" << std::endl;
       exit(-1);

@@ -65,6 +65,22 @@ struct PointRange{
       Point::translate_point(vptr + i * aligned_bytes, pr[i], params);});
   }
 
+  template <class PR, class Seq>
+  PointRange(const PR& pr, Seq indices) {
+    params = pr.params;
+    n = indices.size();
+    aligned_bytes = pr.aligned_bytes;
+    long total_bytes = n * aligned_bytes;
+    byte* ptr = (byte*) aligned_alloc(1l << 21, total_bytes);
+    //madvise(ptr, total_bytes, MADV_HUGEPAGE);
+    values = std::shared_ptr<byte[]>(ptr, std::free);
+    byte* vptr = values.get();
+    for (size_t i=0; i < indices.size(); ++i) {
+      size_t index = indices[i];
+      std::memcpy(location(i), pr.location(index), aligned_bytes);
+    }
+  }
+
   template <typename PR>
   PointRange (PR& pr) : PointRange(pr, Point::generate_parameters(pr)) { }
 
@@ -134,7 +150,6 @@ struct PointRange{
   
   parameters params;
 
-private:
   std::shared_ptr<byte[]> values;
   long aligned_bytes;
   size_t n;

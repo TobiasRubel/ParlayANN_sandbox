@@ -2,6 +2,7 @@
 #include <fstream>
 #include <vector>
 #include <utility>
+#include <unordered_map>
 #include <atomic>
 
 #include <parlay/sequence.h>
@@ -57,13 +58,20 @@ int main(int argc, char* argv[]) {
     // Run beam search with random start and query points, tracking centrality
     std::cout << "Running beam search..." << std::flush;
     auto centrality = parlay::tabulate<std::atomic<uint32_t>>(max_edges, [] (size_t i) {return 0;});
+    auto usage = parlay::tabulate<std::atomic<uint32_t>>(max_edges, [] (size_t i) {return 0;});
     parlay::parallel_for(0, num_queries, [&] (size_t i) {
         index_t start_point = queries[i].first, query_point = queries[i].second;
         parlay::sequence<index_t> starting_points(1, start_point);
+        std::unordered_map<index_t, size_t> source_edges;
         custom_beam_search(
             graph, points[query_point], points, points[query_point], points,
             starting_points, BP,
-            [] (index_t i) {},
+            [&] (index_t i) {
+                auto it = source_edges.find(i);
+                if (it != source_edges.end()) {
+                    usage[it->second]++;
+                }
+            },
             [&] (index_t i, index_t j) {
                 // Find the index of this edge in the adjacency list
                 size_t slot = -1;
@@ -74,6 +82,7 @@ int main(int argc, char* argv[]) {
                     }
                 }
                 if (slot == -1) return;
+                source_edges[j] = i * graph.max_degree() + slot;
                 centrality[i * graph.max_degree() + slot]++;
             }
         );
@@ -96,6 +105,7 @@ int main(int argc, char* argv[]) {
     auto filtered_targets = parlay::tabulate<index_t>(filtered.size(), [&] (size_t i) { return graph[filtered[i] / graph.max_degree()][filtered[i] % graph.max_degree()]; });
     auto filtered_distances = parlay::tabulate<value_t>(filtered.size(), [&] (size_t i) { return edge_lengths[filtered[i]]; });
     auto filtered_centralities = parlay::tabulate<uint32_t>(filtered.size(), [&] (size_t i) { return centrality[filtered[i]].load(); });
+    auto filtered_usage = parlay::tabulate<uint32_t>(filtered.size(), [&] (size_t i) { return usage[filtered[i]].load(); });
     std::cout << "Done" << std::endl;
     std::cout << "Number of filtered edges: " << filtered.size() << std::endl;
 
@@ -107,6 +117,7 @@ int main(int argc, char* argv[]) {
     o_stream.write(reinterpret_cast<char*>(filtered_targets.begin()), num_edges * sizeof(index_t));
     o_stream.write(reinterpret_cast<char*>(filtered_distances.begin()), num_edges * sizeof(value_t));
     o_stream.write(reinterpret_cast<char*>(filtered_centralities.begin()), num_edges * sizeof(uint32_t));
+    o_stream.write(reinterpret_cast<char*>(filtered_usage.begin()), num_edges * sizeof(uint32_t));
     std::cout << "Results written to " << o_file << std::endl;
  
     return 0;

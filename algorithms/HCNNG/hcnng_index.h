@@ -26,6 +26,7 @@
 #include <queue>
 #include <random>
 #include <set>
+#include <stack>
 
 #include "../utils/graph.h"
 #include "2hashClusterEdge.h"
@@ -146,14 +147,9 @@ struct hcnng_index {
     });
   }
 
-  static void star(GraphI &G, PR &Points,
-                   parlay::sequence<size_t> &active_indices, long MSTDeg) {
-    auto root = active_indices[0];
-    for (size_t i = 1; i < active_indices.size(); i++) {
-      //G[root].append_neighbor(active_indices[i]);
-      G[active_indices[i]].append_neighbor(root);
-    }
-  }
+
+
+
 
   static void MSTk(GraphI &G, PR &Points,
                    parlay::sequence<size_t> &active_indices, long MSTDeg) {
@@ -265,13 +261,124 @@ struct hcnng_index {
     G[p].update_neighbors(new_nbhs);
   }
 
+  void greedyShape(indexType p, indexType r, PR &Points, GraphI &G) {
+    auto curr = r;
+    std::vector<indexType> path;
+    std::set<indexType> visited;
+    bool backtracked = false;
+    indexType first_backtrack = kNullId;
+    indexType last_node_on_path = kNullId;
+    path.push_back(r);
+    // greedy search with backtracking
+    while (curr != p) {
+      if (path.back() != curr) path.push_back(curr);
+      visited.insert(curr);
+      auto min = kNullDist;
+      indexType next = kNullId;
+      for (size_t i = 0; i < G[curr].size(); i++) {
+        auto nbh = G[curr][i];
+        if (visited.find(nbh) == visited.end()) {
+          auto dist = Points[p].distance(Points[nbh]);
+          if (dist < min) {
+            min = dist;
+            next = nbh;
+          }
+        }
+      }
+      if (next == kNullId) {
+        if (path.size() == 0) {
+          std::cout << "Error: no path found" << std::endl;
+          break;
+        }
+        path.pop_back();
+        curr = path.back();
+        if (!backtracked) {
+          first_backtrack = curr;
+          backtracked = true;
+          break;
+        }
+      } else {
+        curr = next;
+      }
+    }
+    // last_node_on_path is the node incident to p on the path
+    last_node_on_path = path[path.size() - 2];
+
+    // if back-tracking happened, then add edge from the backtrack node to p and remove the edge from the last node on the path to p
+    if (backtracked) {
+      G[first_backtrack].append_neighbor(p);
+      // for (size_t i = 0; i < G[last_node_on_path].size(); i++) {
+      //   if (G[last_node_on_path][i] == p) {
+      //     G[last_node_on_path][i] = G[last_node_on_path][G[last_node_on_path].size() - 1];
+      //     G[last_node_on_path].update_neighbors(parlay::make_slice(G[last_node_on_path], G[last_node_on_path].size() - 1));
+      //     break;
+      //   }
+      // }
+    }
+
+  }
+    // this version records all backtracking and adds edges for each.
+    // it also returns all edges seen but not traversed.
+  std::set<indexType> greedyShape2(indexType p, indexType r, PR &Points, GraphI &G) {
+    auto curr = r;
+    std::vector<indexType> path;
+    std::set<indexType> visited;
+    std::set<indexType> seen;
+    std::vector<indexType> backtracked_nodes;
+    path.push_back(r);
+    // greedy search with backtracking
+    while (curr != p) {
+      if (path.back() != curr) path.push_back(curr);
+      visited.insert(curr);
+      seen.insert(curr);
+      auto min = kNullDist;
+      indexType next = kNullId;
+      for (size_t i = 0; i < G[curr].size(); i++) {
+        auto nbh = G[curr][i];
+        if (seen.find(nbh) == seen.end()) {
+          auto dist = Points[p].distance(Points[nbh]);
+          if (dist < min) {
+            min = dist;
+            next = nbh;
+          }
+        }
+      }
+      if (next == kNullId) {
+        if (path.size() == 0) {
+          std::cout << "Error: no path found" << std::endl;
+          break;
+        }
+        path.pop_back();
+        curr = path.back();
+        backtracked_nodes.push_back(curr);
+        } else {
+        curr = next;
+      }
+    }
+    // if back-tracking happened, then add edge from the backtrack node to p and remove the edge from the last node on the path to p
+    for (size_t i = 0; i < backtracked_nodes.size(); i++) {
+      G[backtracked_nodes[i]].append_neighbor(p);
+    }
+
+    // return all nodes seen but not visited
+    for (auto it = seen.begin(); it != seen.end(); it++) {
+      if (visited.find(*it) == visited.end()) {
+        seen.erase(it);
+      }
+    }
+    return seen;
+
+  }
+
+
+
   void build_index(GraphI &G, PR &Points, long cluster_rounds,
                    long cluster_size, long MSTDeg, long pivot_type) {
     switch(pivot_type) {
       case 0: {
         std::cout << "Using default pivot method" << std::endl;
         cluster<Point, PointRange, indexType> C;
-        C.multiple_clustertrees(G, Points, cluster_size, cluster_rounds, star,
+        C.multiple_clustertrees(G, Points, cluster_size, cluster_rounds, MSTk,
                                 MSTDeg);
         break;
       }
@@ -304,13 +411,13 @@ struct hcnng_index {
         C2.multiple_clustertrees(G, Points, cluster_size, 5, MSTk, MSTDeg);
         break;
       }
-      case 5: {
-        std::cout << "Using fixed k-ball pivot method" << std::endl;
-        kballcluster<Point, PointRange, indexType> C;
-        C.multiple_clustertrees(G, Points, cluster_size, cluster_rounds, MSTk,
-                                MSTDeg);
-        break;
-      }
+      // case 5: {
+      //   std::cout << "Using fixed k-ball pivot method" << std::endl;
+      //   kballcluster<Point, PointRange, indexType> C;
+      //   C.multiple_clustertrees(G, Points, cluster_size, cluster_rounds, MSTk,
+      //                           MSTDeg);
+      //   break;
+      // }
       default: {
         std::cerr << "Invalid pivot type. Please use -pivot_type XX:\n0: default\n1: 1-vector simhash\n2: random partition\n3: arbitrary simhash bucketing" << std::endl;
         break;
@@ -320,8 +427,35 @@ struct hcnng_index {
     // TODO: enable optional pruning (what is below now works, but
     // should be connected cleanly)
     // std::cout << "pruning..." << std::endl;
-    parlay::parallel_for(0, G.size(), [&] (size_t i){robustPrune(i, Points,
-    G, 1.1);});
+    // parlay::parallel_for(0, G.size(), [&] (size_t i){robustPrune(i, Points,
+    // G, 1.1);});
+
+    // std::cout << "greedy shaping from index 0..." << std::endl;
+    // for (size_t i = 1; i < G.size(); i++) {
+    //   if (i % 10000 == 0) {
+    //     std::cout << "greedy shaping from index " << i << "..." << std::endl;
+    //   }
+    //   greedyShape(i, 0, Points, G);
+    // }
+    // std::cout << "done" << std::endl;
+
+    // std::map<indexType, idx_t> idx_map;
+    // for (size_t i = 1; i < G.size(); i++) {
+    //   if (i % 1000 == 0) {
+    //     std::cout << "greedy shaping from index " << i << "..." << std::endl;
+    //   }
+    //   auto seen = greedyShape2(i, 0, Points, G);
+    //   for (auto it = seen.begin(); it != seen.end(); it++) {
+    //     // if in idx_map, then add to the value, else add to the map
+    //     if (idx_map.find(*it) != idx_map.end()) {
+    //       idx_map[*it] += 1;
+    //     } else {
+    //       idx_map[*it] = 1;
+    //     }        
+    //   }
+    // }
+    //now, 
+    std::cout << "done" << std::endl;
   }
 };
 

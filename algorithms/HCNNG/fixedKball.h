@@ -37,6 +37,22 @@
 
 namespace parlayANN {
 
+//using Floyd's algorithm
+parlay::sequence<size_t> select_k_random(parlay::sequence<size_t> &active_indices,
+                  parlay::random &rnd, size_t k) {
+  parlay::sequence<size_t> selected_indices;
+  auto n = active_indices.size();
+  for (size_t i = n-k; i < n; i++) {
+    size_t index = rnd.ith_rand(i) % i;
+    //if index not in selected_indices push_back, else push_back i
+    if (std::find(selected_indices.begin(), selected_indices.end(), index) == selected_indices.end())
+      selected_indices.push_back(index);
+    else 
+      selected_indices.push_back(i);
+    }
+  return selected_indices;
+}
+
 template <typename Point, typename PointRange, typename indexType>
 struct karycluster {
   using distanceType = typename Point::distanceType;
@@ -53,33 +69,69 @@ struct karycluster {
 
   template <typename F>
   void randomkary_clustering(GraphI &G, PR &Points,
-                         parlay::sequence<size_t>& active_indices,
+                         parlay::sequence<size_t>& active_indices, parlay::random &rnd,
                          size_t cluster_size, F g,
-                         long MSTDeg, size_t num_bits) {
+                         long MSTDeg, size_t num_pivots) {
 
     if (active_indices.size() <= cluster_size)
             g(G, Points, active_indices, MSTDeg);
 
     else {
-      auto d = Points.dimension();
-      auto H = simhash<Point, PointRange, indexType>(num_bits, d);
-      //hash each point, adding it to a subproblem based on the hash
-      parlay::sequence<parlay::sequence<size_t>> buckets(1 << num_bits);
-      // parlay::parallel_for(0, active_indices.size(), [&](size_t i) {
-      //   auto h = H.hash(Points[active_indices[i]]);
-      //   buckets[h].push_back(active_indices[i]);
-      // });
+      auto pivots = select_k_random(active_indices, rnd, num_pivots);
+      //print pivots
+      // std::cout << "selected pivots: ";;
+      // for (size_t i = 0; i < pivots.size(); i++) {
+      //  std::cout << pivots[i] << " ";
+      // }
+      // std::cout << std::endl;
+      parlay::sequence<parlay::sequence<size_t>> buckets(num_pivots);
+      // for (size_t i = 0; i < active_indices.size(); i++) {
+      //   size_t min_dist = std::numeric_limits<size_t>::max();
+      //   size_t min_pivot = 0;
+      //   for (size_t j = 0; j < num_pivots; j++) {
+      //     size_t dist = Points[active_indices[i]].distance(Points[pivots[j]]);
+      //     if (dist < min_dist) {
+      //       min_dist = dist;
+      //       min_pivot = j;
+      //     } else if (dist == min_dist) {
+      //       if (rnd.ith_rand(i) % 2 == 0) {
+      //         min_pivot = j;
+      //       }
+      //     }
+      //   }
+      //   buckets[min_pivot].push_back(active_indices[i]);
+      // }
+      //assign pivots for each point in parallel
+      auto pivot_assignments = parlay::tabulate(active_indices.size(), [&](size_t i) {
+        size_t min_dist = std::numeric_limits<size_t>::max();
+        size_t min_pivot = 0;
+        for (size_t j = 0; j < num_pivots; j++) {
+          size_t dist = Points[active_indices[i]].distance(Points[pivots[j]]);
+          if (dist < min_dist) {
+            min_dist = dist;
+            min_pivot = j;
+          } else if (dist == min_dist) {
+            if (rnd.ith_rand(i) % 2 == 0) {
+              min_pivot = j;
+            }
+          }
+        }
+        return min_pivot;
+      });
+      //assign points to buckets
       for (size_t i = 0; i < active_indices.size(); i++) {
-        auto h = H.hash(Points[active_indices[i]]);
-        buckets[h].push_back(active_indices[i]);
+        buckets[pivot_assignments[i]].push_back(active_indices[i]);
       }
 
-      std::cout << "generated buckets" << std::endl;
-
+      //std::cout << "generated buckets" << std::endl;
+      // create a new random number generator for each bucket
+      parlay::sequence<parlay::random> newrands = parlay::tabulate(num_pivots, [&](size_t i) {
+        return rnd.fork(i);
+      });
       // recurse on all subproblems in parallel
-      parlay::parallel_for(0, 1 << num_bits, [&](size_t i) {
+      parlay::parallel_for(0, num_pivots, [&](size_t i) {
         if (buckets[i].size() > 0) {
-          randomkary_clustering(G, Points, buckets[i], cluster_size, g, MSTDeg, num_bits);
+          randomkary_clustering(G, Points, buckets[i], newrands[i], cluster_size, g, MSTDeg, num_pivots);
         }
       });
   }
@@ -88,14 +140,14 @@ struct karycluster {
   template <typename F>
   void simhash_clustering_wrapper(GraphI &G, PR &Points, size_t cluster_size,
                                  F f, long MSTDeg) {
-    indexType num_bits = 4; // do not modify this to be much bigger unless you also fix the representation of the hash (which is a vector and grows exponentially with num_bits)
+    indexType num_pivots = 32;
     std::random_device rd;
     std::mt19937 rng(rd());
     std::uniform_int_distribution<int> uni(0, Points.size());
     parlay::random rnd(uni(rng));
     auto active_indices =
         parlay::tabulate(Points.size(), [&](size_t i) { return i; });
-    randomkary_clustering(G, Points, active_indices, rnd, cluster_size, f, MSTDeg);
+    randomkary_clustering(G, Points, active_indices, rnd, cluster_size, f, MSTDeg, num_pivots);
   }
 
   template <typename F>

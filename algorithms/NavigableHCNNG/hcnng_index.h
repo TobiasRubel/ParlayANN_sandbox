@@ -26,6 +26,7 @@
 #include <queue>
 #include <random>
 #include <set>
+#include <utility>
 
 #include "../utils/graph.h"
 #include "clusterEdge.h"
@@ -193,7 +194,7 @@ struct hcnng_index {
   }
 
 
-  static void greedyShape(indexType p, indexType r, PR &Points, GraphI &G) {
+  static std::pair<size_t,size_t> greedyShape(indexType p, indexType r, PR &Points, GraphI &G, parlay::sequence<size_t> &active_indices) {
     auto curr = r;
     std::vector<indexType> path;
     std::set<indexType> visited;
@@ -209,7 +210,7 @@ struct hcnng_index {
       indexType next = kNullId;
       for (size_t i = 0; i < G[curr].size(); i++) {
         auto nbh = G[curr][i];
-        if (visited.find(nbh) == visited.end()) {
+        if (std::find(active_indices.begin(), active_indices.end(), nbh) != active_indices.end() && visited.find(nbh) == visited.end()) {
           auto dist = Points[p].distance(Points[nbh]);
           if (dist < min) {
             min = dist;
@@ -234,11 +235,12 @@ struct hcnng_index {
       }
     }
     // last_node_on_path is the node incident to p on the path
-    last_node_on_path = path[path.size() - 2];
+    //last_node_on_path = path[path.size() - 2];
 
     // if back-tracking happened, then add edge from the backtrack node to p and remove the edge from the last node on the path to p
     if (backtracked) {
       G[first_backtrack].append_neighbor(p);
+      return std::make_pair(first_backtrack, p);
       // for (size_t i = 0; i < G[last_node_on_path].size(); i++) {
       //   if (G[last_node_on_path][i] == p) {
       //     G[last_node_on_path][i] = G[last_node_on_path][G[last_node_on_path].size() - 1];
@@ -247,6 +249,7 @@ struct hcnng_index {
       //   }
       // }
     }
+    return std::make_pair(kNullId, kNullId);
 
   }
 
@@ -370,17 +373,27 @@ struct hcnng_index {
     }
     process_edges(G, std::move(MST_edges));
     leaf_count++;
-
-    lock.lock();
+    std::cout << "new leaf being processed of size " << active_indices.size() << std::endl; 
+    // check if there are duplicates in active_indices
+    // std::set<indexType> s;
+    // for (size_t i = 0; i < active_indices.size(); i++) {
+    //   if (s.find(active_indices[i]) != s.end()) {
+    //     std::cout << "Error: duplicates in active_indices" << std::endl;
+    //     //print all active_indices
+    //     for (size_t j = 0; j < active_indices.size(); j++) {
+    //       std::cout << active_indices[j] << " ";
+    //     }
+    //     std::cout << std::endl;
+    //     exit(1);
+    //   }
+    //   s.insert(active_indices[i]);
+    // }
     //run greedy shape on all points in active_indices
-    for (size_t i = 0; i < active_indices.size(); i++) {
-      greedyShape(active_indices[i], active_indices[0], Points, G);
+    for (size_t i = 1; i < active_indices.size(); i++) {
+      auto [s,t] = greedyShape(active_indices[i], active_indices[0], Points, G, active_indices);
+      std::cout << "running on:" << active_indices[0] << " " << active_indices[i] << std::endl;
+      std::cout << "result ( " << s << " , " << t << " )"<< std::endl;
     }
-    //run prune on all points in active_indices
-    for (size_t i = 0; i < active_indices.size(); i++) {
-      robustPrune(active_indices[i], Points, G, 1.1);
-    }
-    lock.unlock();
   }
 
   void build_index(GraphI &G, PR &Points, long cluster_rounds,

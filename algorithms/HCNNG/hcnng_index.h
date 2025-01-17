@@ -411,13 +411,13 @@ struct hcnng_index {
         C2.multiple_clustertrees(G, Points, cluster_size, 5, MSTk, MSTDeg);
         break;
       }
-      // case 5: {
-      //   std::cout << "Using fixed k-ball pivot method" << std::endl;
-      //   kballcluster<Point, PointRange, indexType> C;
-      //   C.multiple_clustertrees(G, Points, cluster_size, cluster_rounds, MSTk,
-      //                           MSTDeg);
-      //   break;
-      // }
+      case 5: {
+        std::cout << "Using fixed k-ball pivot method" << std::endl;
+        karycluster<Point, PointRange, indexType> C;
+        C.multiple_clustertrees(G, Points, cluster_size, cluster_rounds, MSTk,
+                                MSTDeg);
+        break;
+      }
       default: {
         std::cerr << "Invalid pivot type. Please use -pivot_type XX:\n0: default\n1: 1-vector simhash\n2: random partition\n3: arbitrary simhash bucketing" << std::endl;
         break;

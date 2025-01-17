@@ -139,8 +139,7 @@ struct karycluster {
 
   template <typename F>
   void simhash_clustering_wrapper(GraphI &G, PR &Points, size_t cluster_size,
-                                 F f, long MSTDeg) {
-    indexType num_pivots = 32;
+                                 F f, long MSTDeg, long num_pivots) {
     std::random_device rd;
     std::mt19937 rng(rd());
     std::uniform_int_distribution<int> uni(0, Points.size());
@@ -152,9 +151,9 @@ struct karycluster {
 
   template <typename F>
   void multiple_clustertrees(GraphI &G, PR &Points, long cluster_size,
-                             long num_clusters, F f, long MSTDeg) {
+                             long num_clusters, F f, long MSTDeg, long num_pivots) {
     for (long i = 0; i < num_clusters; i++) {
-      simhash_clustering_wrapper(G, Points, cluster_size, f, MSTDeg);
+      simhash_clustering_wrapper(G, Points, cluster_size, f, MSTDeg, num_pivots);
       std::cout << "Built cluster " << i+1 << " of " << num_clusters << std::endl;
     }
   }

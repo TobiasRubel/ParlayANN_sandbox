@@ -373,7 +373,8 @@ struct hcnng_index {
 
 
   void build_index(GraphI &G, PR &Points, long cluster_rounds,
-                   long cluster_size, long MSTDeg, long pivot_type) {
+                   long cluster_size, long MSTDeg, long pivot_type,
+                   long num_pivots) {
     switch(pivot_type) {
       case 0: {
         std::cout << "Using default pivot method" << std::endl;
@@ -415,7 +416,7 @@ struct hcnng_index {
         std::cout << "Using fixed k-ball pivot method" << std::endl;
         karycluster<Point, PointRange, indexType> C;
         C.multiple_clustertrees(G, Points, cluster_size, cluster_rounds, MSTk,
-                                MSTDeg);
+                                MSTDeg, num_pivots);
         break;
       }
       default: {

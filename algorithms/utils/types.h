@@ -209,8 +209,9 @@ struct BuildParams{
     : R(R), alpha(a), num_clusters(nc), cluster_size(cs), delta(de), verbose(false)
   {alg_type = "pyNNDescent";}
 
-  long max_degree(){
-    if(alg_type == "HCNNG") return num_clusters*MST_deg + 40;
+  long max_degree() {
+    if(alg_type == "HCNNG") return num_clusters*MST_deg;
+    else if(alg_type == "NAVHCNNG")  return num_clusters*MST_deg + 40;
     else if(alg_type == "HNSW")  return R*2;
     else return R;
   }

@@ -159,6 +159,7 @@ struct cluster {
     num_leaders = std::max<size_t>(num_leaders, 3);
     Bucket leaders(num_leaders);
     std::mt19937 prng(seed);
+    seed = parlay::hash64(seed);
     std::sample(ids.begin(), ids.end(), leaders.begin(), leaders.size(), prng);
 
 //		std::cout << "after sampling: leaders size " << leaders.size() << std::endl;
@@ -277,7 +278,7 @@ struct cluster {
     }
   }
 
-  int seed = 555;
+  size_t seed = 555;
   double FRACTION_LEADERS = 0.005;
   size_t TOP_LEVEL_NUM_LEADERS = 950;
   size_t MAX_NUM_LEADERS = 1500;

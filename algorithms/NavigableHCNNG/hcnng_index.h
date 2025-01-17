@@ -272,6 +272,7 @@ struct hcnng_index {
 
   // parameters dim and K are just to interface with the cluster tree code
   static void MSTk(GraphI &G, PR &Points,
+                   parlay::sequence<uint32_t> &active_indices, long MSTDeg) {
     lock.lock();
     start_points.push_back(active_indices[0]);
     lock.unlock();

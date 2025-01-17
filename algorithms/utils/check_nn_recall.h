@@ -130,27 +130,27 @@ nn_result checkRecall(const Graph<indexType> &G,
 void write_to_csv(std::string csv_filename, std::string exp_prefix, parlay::sequence<float> buckets,
                   parlay::sequence<nn_result> results, Graph_ G) {
   csvfile csv(csv_filename);
-  csv << "GRAPH"
-      << exp_prefix
-      << "Parameters"
-      << "Size"
-      << "Build time"
-      << "Avg degree"
-      << "Max degree" << endrow;
-  csv << G.name << G.params << G.size << G.time << G.avg_deg << G.max_deg
-      << endrow;
-  csv << endrow;
-  csv << "Num queries"
-      << "Target recall"
-      << "Actual recall"
-      << "QPS"
-      << "Average Cmps"
-      << "Tail Cmps"
-      << "Average Visited"
-      << "Tail Visited"
-      << "k"
-      << "Q"
-      << "cut" << endrow;
+  //csv << "GRAPH"
+  //    << exp_prefix
+  //    << "Parameters"
+  //    << "Size"
+  //    << "Build time"
+  //    << "Avg degree"
+  //    << "Max degree" << endrow;
+  //csv << G.name << G.params << G.size << G.time << G.avg_deg << G.max_deg
+  //    << endrow;
+  //csv << endrow;
+  //csv << "Num queries"
+  //    << "Target recall"
+  //    << "Actual recall"
+  //    << "QPS"
+  //    << "Average Cmps"
+  //    << "Tail Cmps"
+  //    << "Average Visited"
+  //    << "Tail Visited"
+  //    << "k"
+  //    << "Q"
+  //    << "cut" << endrow;
   for (int i = 0; i < results.size(); i++) {
     nn_result N = results[i];
     csv << exp_prefix << N.num_queries << buckets[i] << N.recall << N.QPS << N.avg_cmps

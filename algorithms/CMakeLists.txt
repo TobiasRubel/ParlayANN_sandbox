@@ -1,4 +1,5 @@
 add_subdirectory(HCNNG)
+add_subdirectory(NavigableHCNNG)
 add_subdirectory(HNSW)
 add_subdirectory(pyNNDescent)
 add_subdirectory(vamana)

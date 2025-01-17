@@ -69,7 +69,7 @@ class csvfile {
 
   csvfile& operator<<(const char* val) { return write(escape(val)); }
 
-  csvfile& operator<<(const std::string& val) { return write(escape(val)); }
+  csvfile& operator<<(const std::string& val) { return write(val); }
 
   template <typename T>
   csvfile& operator<<(const T& val) {

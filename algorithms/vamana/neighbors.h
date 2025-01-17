@@ -39,6 +39,8 @@
 
 namespace parlayANN {
 
+static std::string kAlgType = "Vamana";
+
 template<typename PointRange, typename QPointRange, typename QQPointRange, typename indexType>
 void ANN_Quantized(Graph<indexType> &G, long k, BuildParams &BP,
                    PointRange &Query_Points, QPointRange &Q_Query_Points, QQPointRange &QQ_Query_Points,

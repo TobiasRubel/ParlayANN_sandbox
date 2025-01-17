@@ -37,6 +37,8 @@
 
 namespace parlayANN {
 
+static std::string kAlgType = "NavHCNNG";
+
 template<typename Point, typename PointRange, typename indexType>
 void ANN(Graph<indexType> &G, long k, BuildParams &BP,
          PointRange &Query_Points,

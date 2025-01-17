@@ -102,9 +102,6 @@ struct DisjointSet {
 // Horrible hacks. Fix.
 SpinLock lock;
 std::vector<uint32_t> start_points;
-
-std::vector<uint32_t> connected_components;
-
 template <typename Point, typename PointRange, typename indexType>
 struct hcnng_index {
   using distanceType = typename Point::distanceType;
@@ -269,35 +266,6 @@ struct hcnng_index {
     start_points.push_back(active_indices[0]);
     lock.unlock();
     leaf_count++;
-    //run greedy shape on all points in active_indices
-    // for (size_t i = 0; i < active_indices.size(); i++) {
-    //   greedyShape(active_indices[i], active_indices[0], Points, G);
-    // }
-    //compute # of connected components in leaf
-    // std::set<indexType> visited;
-    // uint32_t num_cc = 0;
-    // while (visited.size() < active_indices.size()) {
-    //   std::queue<indexType> Q;
-    //   num_cc++;
-    //   for (size_t i = 0; i < active_indices.size(); i++) {
-    //     if (visited.find(active_indices[i]) == visited.end()) {
-    //       Q.push(active_indices[i]);
-    //       break;
-    //     }
-    //   }
-    //   while (!Q.empty()) {
-    //     indexType curr = Q.front();
-    //     Q.pop();
-    //     visited.insert(curr);
-    //     for (size_t i = 0; i < G[curr].size(); i++) {
-    //       indexType nbh = G[curr][i];
-    //       if (visited.find(nbh) == visited.end()) {
-    //         Q.push(nbh);
-    //       }
-    //     }
-    //   }
-    // }
-    // connected_components.push_back(num_cc);
   }
 
 
@@ -373,37 +341,16 @@ struct hcnng_index {
     }
     process_edges(G, std::move(MST_edges));
     leaf_count++;
-    std::cout << "new leaf being processed of size " << active_indices.size() << std::endl; 
-    // check if there are duplicates in active_indices
-    // std::set<indexType> s;
-    // for (size_t i = 0; i < active_indices.size(); i++) {
-    //   if (s.find(active_indices[i]) != s.end()) {
-    //     std::cout << "Error: duplicates in active_indices" << std::endl;
-    //     //print all active_indices
-    //     for (size_t j = 0; j < active_indices.size(); j++) {
-    //       std::cout << active_indices[j] << " ";
-    //     }
-    //     std::cout << std::endl;
-    //     exit(1);
-    //   }
-    //   s.insert(active_indices[i]);
-    // }
-    //run greedy shape on all points in active_indices
-    for (size_t i = 1; i < active_indices.size(); i++) {
-      auto [s,t] = greedyShape(active_indices[i], active_indices[0], Points, G, active_indices);
-      std::cout << "running on:" << active_indices[0] << " " << active_indices[i] << std::endl;
-      std::cout << "result ( " << s << " , " << t << " )"<< std::endl;
-    }
   }
 
   void build_index(GraphI &G, PR &Points, long cluster_rounds,
                    long cluster_size, long MSTDeg) {
     cluster<Point, PointRange, indexType> C;
     start_points.push_back(0);
-    // C.multiple_clustertrees(G, Points, cluster_size, cluster_rounds, VamanaLeaf,
-    //                         MSTDeg);
-    C.multiple_clustertrees(G, Points, cluster_size, cluster_rounds, MSTk,
-                            MSTDeg);
+     C.multiple_clustertrees(G, Points, cluster_size, cluster_rounds, VamanaLeaf,
+                             MSTDeg);
+    //C.multiple_clustertrees(G, Points, cluster_size, cluster_rounds, MSTk,
+    //                        MSTDeg);
     std::cout << "Total start points = " << start_points.size() << std::endl;
     // auto avg_connected_components = parlay::reduce(connected_components)/connected_components.size();
     // std::cout << "Average connected components = " << avg_connected_components << std::endl;

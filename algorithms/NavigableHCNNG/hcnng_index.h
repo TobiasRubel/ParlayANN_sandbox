@@ -252,7 +252,7 @@ struct hcnng_index {
 
   // parameters dim and K are just to interface with the cluster tree code
   static void VamanaLeaf(GraphI &G, PR &Points,
-                         parlay::sequence<size_t> &active_indices, long MSTDeg) {
+                         parlay::sequence<uint32_t> &active_indices, long MSTDeg) {
     BuildParams BP;
     BP.R = MSTDeg;
     BP.L = MSTDeg*5;
@@ -265,16 +265,17 @@ struct hcnng_index {
     lock.lock();
     start_points.push_back(active_indices[0]);
     lock.unlock();
+
     leaf_count++;
   }
 
 
   // parameters dim and K are just to interface with the cluster tree code
   static void MSTk(GraphI &G, PR &Points,
-                   parlay::sequence<size_t> &active_indices, long MSTDeg) {
     lock.lock();
     start_points.push_back(active_indices[0]);
     lock.unlock();
+
     // preprocessing for Kruskal's
     size_t N = active_indices.size();
     long dim = Points.dimension();
@@ -344,16 +345,19 @@ struct hcnng_index {
   }
 
   void build_index(GraphI &G, PR &Points, long cluster_rounds,
-                   long cluster_size, long MSTDeg) {
+                   long cluster_size, long MSTDeg, bool multi_pivot, bool prune, bool mst_k) {
     cluster<Point, PointRange, indexType> C;
     start_points.push_back(0);
-     C.multiple_clustertrees(G, Points, cluster_size, cluster_rounds, VamanaLeaf,
-                             MSTDeg);
-    //C.multiple_clustertrees(G, Points, cluster_size, cluster_rounds, MSTk,
-    //                        MSTDeg);
+    C.MSTDeg = MSTDeg;
+    C.MULTI_PIVOT = multi_pivot;
+
+    if (mst_k) {
+      C.multiple_clustertrees(G, Points, cluster_size, cluster_rounds, MSTk);
+    } else {
+      C.multiple_clustertrees(G, Points, cluster_size, cluster_rounds, VamanaLeaf);
+    }
     std::cout << "Total start points = " << start_points.size() << std::endl;
-    // auto avg_connected_components = parlay::reduce(connected_components)/connected_components.size();
-    // std::cout << "Average connected components = " << avg_connected_components << std::endl;
+
     start_points.clear();
     BuildParams BP;
     BP.R = 40;
@@ -364,9 +368,9 @@ struct hcnng_index {
     auto edges = run_vamana_on_indices(start_points, Points, BP);
     process_edges(G, std::move(edges));
     remove_all_duplicates(G);
-    // TODO: enable optional pruning (what is below now works, but
-    // should be connected cleanly)
-    parlay::parallel_for(0, G.size(), [&] (size_t i){robustPrune(i, Points, G, 1.1);});
+    if (prune) {
+      parlay::parallel_for(0, G.size(), [&] (size_t i){robustPrune(i, Points, G, 1.1);});
+    }
   }
 };
 

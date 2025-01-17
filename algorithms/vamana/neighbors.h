@@ -31,6 +31,7 @@
 #include "../utils/stats.h"
 #include "../utils/types.h"
 #include "../utils/graph.h"
+#include "../bench/parse_command_line.h"
 #include "index.h"
 #include "parlay/parallel.h"
 #include "parlay/primitives.h"
@@ -113,7 +114,7 @@ template<typename Point, typename PointRange_, typename indexType>
 void ANN(Graph<indexType> &G, long k, BuildParams &BP,
          PointRange_ &Query_Points,
          groundTruth<indexType> GT, char *res_file, char* exp_prefix,
-         bool graph_built, PointRange_ &Points) {
+         bool graph_built, PointRange_ &Points, commandLine &P) {
   if (BP.quantize != 0) {
     std::cout << "quantizing build and first pass of search to 1 byte" << std::endl;
     if (Point::is_metric()) {

@@ -25,6 +25,7 @@
 #include <math.h>
 
 #include <algorithm>
+#include <atomic>
 #include <functional>
 #include <queue>
 #include <random>
@@ -63,9 +64,6 @@ auto run_vamana_on_indices(Seq &seq, PR &all_points, BuildParams &BP) {
 
   return edges;
 }
-
-
-#include <atomic>
 
 class SpinLock {
 public:

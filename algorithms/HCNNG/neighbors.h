@@ -33,6 +33,7 @@
 #include "../utils/check_nn_recall.h"
 #include "../utils/graph.h"
 #include "hcnng_index.h"
+#include "../bench/parse_command_line.h"
 
 namespace parlayANN {
 
@@ -40,7 +41,7 @@ template<typename Point, typename PointRange, typename indexType>
 void ANN(Graph<indexType> &G, long k, BuildParams &BP,
          PointRange &Query_Points,
          groundTruth<indexType> GT, char *res_file, char* exp_prefix,
-         bool graph_built, PointRange &Points) {
+         bool graph_built, PointRange &Points, commandLine &P) {
 
   parlay::internal::timer t("ANN"); 
   using findex = hcnng_index<Point, PointRange, indexType>;

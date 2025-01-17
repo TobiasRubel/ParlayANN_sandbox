@@ -33,6 +33,7 @@
 #include "../utils/check_nn_recall.h"
 #include "../utils/graph.h"
 #include "hcnng_index.h"
+#include "../bench/parse_command_line.h"
 
 namespace parlayANN {
 
@@ -40,15 +41,19 @@ template<typename Point, typename PointRange, typename indexType>
 void ANN(Graph<indexType> &G, long k, BuildParams &BP,
          PointRange &Query_Points,
          groundTruth<indexType> GT, char *res_file, char* exp_prefix,
-         bool graph_built, PointRange &Points) {
+         bool graph_built, PointRange &Points, commandLine& P) {
 
   parlay::internal::timer t("ANN"); 
   using findex = hcnng_index<Point, PointRange, indexType>;
 
+  bool multi_pivot = P.getOption("-multi_pivot");
+  bool prune = P.getOption("-prune");
+  bool mst_k = P.getOption("-mst_k");
+
   double idx_time;
   if(!graph_built){
     findex I;
-    I.build_index(G, Points, BP.num_clusters, BP.cluster_size, BP.MST_deg);
+    I.build_index(G, Points, BP.num_clusters, BP.cluster_size, BP.MST_deg, multi_pivot, prune, mst_k);
     idx_time = t.next_time();
   } else{idx_time=0;}
   std::string name = "NavHCNNG";

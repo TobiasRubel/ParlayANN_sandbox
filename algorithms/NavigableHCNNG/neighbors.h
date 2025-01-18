@@ -50,12 +50,13 @@ void ANN(Graph<indexType> &G, long k, BuildParams &BP,
 
   bool multi_pivot = P.getOption("-multi_pivot");
   bool prune = P.getOption("-prune");
+  long prune_degree = P.getOptionLongValue("-prune_degree", std::numeric_limits<long>::max());
   bool mst_k = P.getOption("-mst_k");
 
   double idx_time;
   if(!graph_built){
     findex I;
-    I.build_index(G, Points, BP.num_clusters, BP.cluster_size, BP.MST_deg, multi_pivot, prune, mst_k);
+    I.build_index(G, Points, BP.num_clusters, BP.cluster_size, BP.MST_deg, multi_pivot, prune, mst_k, prune_degree);
     idx_time = t.next_time();
   } else{idx_time=0;}
   std::string name = "NavHCNNG";

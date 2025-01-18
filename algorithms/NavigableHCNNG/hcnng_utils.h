@@ -60,6 +60,10 @@ auto run_vamana_on_indices(Seq &seq, PR &all_points, BuildParams &BP) {
       auto neighbor_ind = seq[G[i][j]];
       edges.push_back(std::make_pair(our_ind, neighbor_ind));
     }
+    if (G[i].size() > BP.R) {
+      std::cout << "point: " << i << " exceeded max degree... " << std::endl;
+      exit(0);
+    }
   }
 
   return edges;

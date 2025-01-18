@@ -152,7 +152,7 @@ struct hcnng_index {
     // robustPrune routine as found in DiskANN paper, with the exception that the
   // new candidate set is added to the field new_nbhs instead of directly
   // replacing the out_nbh of p
-  static void robustPrune(indexType p, PR &Points, GraphI &G, double alpha) {
+  static void robustPrune(indexType p, PR &Points, GraphI &G, double alpha, size_t degree) {
     // add out neighbors of p to the candidate set.
     parlay::sequence<pid> candidates;
     for (size_t i = 0; i < G[p].size(); i++) {
@@ -167,7 +167,7 @@ struct hcnng_index {
     parlay::sequence<int> new_nbhs = parlay::sequence<int>();
 
     size_t candidate_idx = 0;
-    while (new_nbhs.size() < G.max_degree() &&
+    while (new_nbhs.size() < degree &&
            candidate_idx < candidates.size()) {
       // Don't need to do modifications.
       indexType p_star = candidates[candidate_idx].first;
@@ -247,7 +247,6 @@ struct hcnng_index {
       // }
     }
     return std::make_pair(kNullId, kNullId);
-
   }
 
   // parameters dim and K are just to interface with the cluster tree code
@@ -275,6 +274,11 @@ struct hcnng_index {
                    parlay::sequence<uint32_t> &active_indices, long MSTDeg) {
     lock.lock();
     start_points.push_back(active_indices[0]);
+    double extra_fraction = 0.01;
+
+    std::mt19937 prng(parlay::hash64(active_indices[0]));
+    std::sample(ids.begin(), ids.end(), leaders.begin(), leaders.size(), prng);
+
     lock.unlock();
 
     // preprocessing for Kruskal's
@@ -346,7 +350,7 @@ struct hcnng_index {
   }
 
   void build_index(GraphI &G, PR &Points, long cluster_rounds,
-                   long cluster_size, long MSTDeg, bool multi_pivot, bool prune, bool mst_k) {
+                   long cluster_size, long MSTDeg, bool multi_pivot, bool prune, bool mst_k, long prune_degree) {
     cluster<Point, PointRange, indexType> C;
     start_points.push_back(0);
     C.MSTDeg = MSTDeg;
@@ -359,7 +363,6 @@ struct hcnng_index {
     }
     std::cout << "Total start points = " << start_points.size() << std::endl;
 
-    start_points.clear();
     BuildParams BP;
     BP.R = 40;
     BP.L = 200;
@@ -369,8 +372,10 @@ struct hcnng_index {
     auto edges = run_vamana_on_indices(start_points, Points, BP);
     process_edges(G, std::move(edges));
     remove_all_duplicates(G);
+
+    start_points.clear();
     if (prune) {
-      parlay::parallel_for(0, G.size(), [&] (size_t i){robustPrune(i, Points, G, 1.1);});
+      parlay::parallel_for(0, G.size(), [&] (size_t i){robustPrune(i, Points, G, 1.1, prune_degree);});
     }
   }
 };

@@ -141,6 +141,7 @@ struct Graph{
   }
 
   Graph(long maxDeg, size_t n) : maxDeg(maxDeg), n(n) {
+    std::cout << "Creating graph: " << maxDeg << " " << n << std::endl;
     allocate_graph(maxDeg, n);
   }
 

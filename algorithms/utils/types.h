@@ -207,7 +207,7 @@ struct BuildParams{
 
   long max_degree() {
     if(alg_type == "HCNNG") return num_clusters*MST_deg;
-    else if(alg_type == "NAVHCNNG")  return num_clusters*MST_deg + 40;
+    else if(alg_type == "NavHCNNG")  return num_clusters*MST_deg + 40;
     else if(alg_type == "HNSW")  return R*2;
     else return R;
   }

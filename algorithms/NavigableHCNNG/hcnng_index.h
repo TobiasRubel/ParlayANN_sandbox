@@ -99,7 +99,7 @@ struct DisjointSet {
 
 // Horrible hacks. Fix.
 SpinLock lock;
-std::vector<uint32_t> start_points;
+parlay::sequence<uint32_t> start_points;
 template <typename Point, typename PointRange, typename indexType>
 struct hcnng_index {
   using distanceType = typename Point::distanceType;
@@ -354,29 +354,48 @@ struct hcnng_index {
 
   void build_index(GraphI &G, PR &Points, long cluster_rounds,
                    long cluster_size, long MSTDeg, bool multi_pivot, bool prune,
-                   bool mst_k, long prune_degree) {
+                   bool mst_k, long prune_degree, bool vamana_long_range, double top_level_pct) {
     cluster<Point, PointRange, indexType> C;
     start_points.push_back(0);
     C.MSTDeg = MSTDeg;
     C.MULTI_PIVOT = multi_pivot;
+    std::cout << "Set MSTDeg to: " << MSTDeg << " MultiPivot to: " << multi_pivot << std::endl;
 
     if (mst_k) {
+      std::cout << "Using MSTk" << std::endl;
       C.multiple_clustertrees(G, Points, cluster_size, cluster_rounds, MSTk);
     } else {
+      std::cout << "Using VamanaLeaf" << std::endl;
       C.multiple_clustertrees(G, Points, cluster_size, cluster_rounds,
                               VamanaLeaf);
     }
-    std::cout << "Total start points = " << start_points.size() << std::endl;
 
-    BuildParams BP;
-    BP.R = 40;
-    BP.L = 200;
-    BP.alpha = 1.1;
-    BP.num_passes = 3;
-    BP.single_batch = 0;
-    auto edges = run_vamana_on_indices(start_points, Points, BP);
-    process_edges(G, std::move(edges));
-    remove_all_duplicates(G);
+
+    if (vamana_long_range) {
+      std::cout << "Total start points = " << start_points.size() << std::endl;
+      std::cout << "Adding long range edges using Vamana" << std::endl;
+      BuildParams BP;
+      BP.R = 40;
+      BP.L = 200;
+      BP.alpha = 1.1;
+      BP.num_passes = 3;
+      BP.single_batch = 0;
+
+      std::mt19937 prng(0);
+      auto ids = parlay::tabulate(Points.size(), [&](uint32_t i) { return i; });
+      std::vector<uint32_t> extra_pts(G.size() * top_level_pct);
+      std::sample(ids.begin(), ids.end(), extra_pts.begin(), extra_pts.size(), prng);
+      for (auto top : extra_pts)  {
+        start_points.push_back(top);
+      }
+  
+      // Remove duplicates from start points (points could be added as
+      // start points multiple times in different replicas).
+      start_points = parlay::remove_duplicates(start_points);
+      auto edges = run_vamana_on_indices(start_points, Points, BP);
+      process_edges(G, std::move(edges));
+      remove_all_duplicates(G);
+    }
 
     start_points.clear();
     if (prune) {

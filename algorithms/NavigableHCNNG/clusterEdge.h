@@ -136,7 +136,8 @@ struct cluster {
   void random_clustering_wrapper(GraphI &G, PR &Points, size_t cluster_size,
                                  F f) {
     std::random_device rd;
-    std::mt19937 rng(rd());
+    std::mt19937 rng(seed);
+    seed = parlay::hash64(seed);
     std::uniform_int_distribution<int> uni(0, Points.size());
     parlay::random rnd(uni(rng));
     auto ids = parlay::tabulate(Points.size(), [&](uint32_t i) { return i; });

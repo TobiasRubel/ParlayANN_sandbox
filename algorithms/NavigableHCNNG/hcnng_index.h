@@ -279,8 +279,8 @@ struct hcnng_index {
     start_points.push_back(active_indices[0]);
     double extra_fraction = 0.01;
 
-    std::mt19937 prng(parlay::hash64(active_indices[0]));
-    std::sample(ids.begin(), ids.end(), leaders.begin(), leaders.size(), prng);
+    //std::mt19937 prng(parlay::hash64(active_indices[0]));
+    //std::sample(active_indices.begin(), active_indices.end(), leaders.begin(), leaders.size(), prng);
 
     lock.unlock();
 

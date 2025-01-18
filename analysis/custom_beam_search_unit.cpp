@@ -2,6 +2,7 @@
 
 int main(int argc, char* argv[]) {
     auto BP = parlayANN::BuildParams(
+        "CustomBeamSearch",
         64, // max degree
         256, // beam size
         1.2, // alpha

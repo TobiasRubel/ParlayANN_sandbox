@@ -147,7 +147,8 @@ struct cluster {
   std::vector<Bucket> RecursivelySketch(PR &Points, Bucket &ids,
                                         long cluster_size, int depth,
                                         int fanout) {
-//		std::cout << "In recursively sketch, ids.size = " << ids.size() << " cluster size = " << cluster_size << std::endl;
+    //		std::cout << "In recursively sketch, ids.size = " << ids.size() << "
+    //cluster size = " << cluster_size << std::endl;
     if (ids.size() <= cluster_size) {
       return {ids};
     }
@@ -162,10 +163,11 @@ struct cluster {
     seed = parlay::hash64(seed);
     std::sample(ids.begin(), ids.end(), leaders.begin(), leaders.size(), prng);
 
-//		std::cout << "after sampling: leaders size " << leaders.size() << std::endl;
+    //		std::cout << "after sampling: leaders size " << leaders.size() <<
+    //std::endl;
     auto leader_points = PointRange(Points, leaders);
     std::vector<Bucket> clusters(leaders.size());
-//		std::cout << "Computing clusters" << std::endl;
+    //		std::cout << "Computing clusters" << std::endl;
 
     {  // less readable than map + zip + flatten, but at least it's as efficient
        // as possible for fanout = 1
@@ -186,7 +188,7 @@ struct cluster {
         clusters[i] = Bucket(pclusters[i].begin(), pclusters[i].end());
       });
     }
-//		std::cout << "Assigned to closest leaders" << std::endl;
+    //		std::cout << "Assigned to closest leaders" << std::endl;
 
     leaders.clear();
     // TODO: clear leader_points PR.
@@ -212,40 +214,44 @@ struct cluster {
       }
       clusters.pop_back();
     }
-//		std::cout << "Done merging" << std::endl;
+    //		std::cout << "Done merging" << std::endl;
 
     // recurse on clusters
     SpinLock bucket_lock;
-    parlay::parallel_for(0, clusters.size(), [&](size_t cluster_id) {
-      std::vector<Bucket> recursive_buckets;
-      if (depth > MAX_DEPTH ||
-          (depth > CONCERNING_DEPTH &&
-           clusters[cluster_id].size() >
-               TOO_SMALL_SHRINKAGE_FRACTION * ids.size())) {
-        // Base case for duplicates and near-duplicates. Split the buckets
-        // randomly
-        auto ids_copy = clusters[cluster_id];
-        std::mt19937 prng(seed + depth + ids.size());
-        std::shuffle(ids_copy.begin(), ids_copy.end(), prng);
-        for (size_t i = 0; i < ids_copy.size(); i += MAX_CLUSTER_SIZE) {
-          auto &new_bucket = recursive_buckets.emplace_back();
-          for (size_t j = 0; j < MAX_CLUSTER_SIZE; ++j) {
-            new_bucket.push_back(ids_copy[j]);
+    parlay::parallel_for(
+        0, clusters.size(),
+        [&](size_t cluster_id) {
+          std::vector<Bucket> recursive_buckets;
+          if (depth > MAX_DEPTH ||
+              (depth > CONCERNING_DEPTH &&
+               clusters[cluster_id].size() >
+                   TOO_SMALL_SHRINKAGE_FRACTION * ids.size())) {
+            // Base case for duplicates and near-duplicates. Split the buckets
+            // randomly
+            auto ids_copy = clusters[cluster_id];
+            std::mt19937 prng(seed + depth + ids.size());
+            std::shuffle(ids_copy.begin(), ids_copy.end(), prng);
+            for (size_t i = 0; i < ids_copy.size(); i += MAX_CLUSTER_SIZE) {
+              auto &new_bucket = recursive_buckets.emplace_back();
+              for (size_t j = 0; j < MAX_CLUSTER_SIZE; ++j) {
+                new_bucket.push_back(ids_copy[j]);
+              }
+            }
+          } else {
+            // The normal case
+            recursive_buckets =
+                RecursivelySketch(Points, clusters[cluster_id], cluster_size,
+                                  depth + 1, /*fanout=*/1);
           }
-        }
-      } else {
-        // The normal case
-        recursive_buckets = RecursivelySketch(Points, clusters[cluster_id],
-                                              cluster_size, depth + 1, /*fanout=*/1);
-      }
 
-      bucket_lock.lock();
-      buckets.insert(buckets.end(), recursive_buckets.begin(),
-                     recursive_buckets.end());
-      bucket_lock.unlock();
-    }, 1);
+          bucket_lock.lock();
+          buckets.insert(buckets.end(), recursive_buckets.begin(),
+                         recursive_buckets.end());
+          bucket_lock.unlock();
+        },
+        1);
 
-		return buckets;
+    return buckets;
   }
 
   template <typename F>
@@ -257,11 +263,10 @@ struct cluster {
     parlay::random rnd(uni(rng));
     auto ids = parlay::tabulate(Points.size(), [&](uint32_t i) { return i; });
     auto buckets = RecursivelySketch(Points, ids, cluster_size, 0, FANOUT);
-		std::cout << "Computed buckets!" << std::endl;
-		// Build on each bucket.
-		parlay::parallel_for(0, buckets.size(), [&] (size_t i) {
-			f(G, Points, buckets[i], MSTDeg);
-		});
+    std::cout << "Computed buckets!" << std::endl;
+    // Build on each bucket.
+    parlay::parallel_for(0, buckets.size(),
+                         [&](size_t i) { f(G, Points, buckets[i], MSTDeg); });
   }
 
   template <typename F>

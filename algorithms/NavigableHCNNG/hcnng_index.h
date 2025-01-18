@@ -30,14 +30,12 @@
 
 #include "../utils/graph.h"
 #include "clusterEdge.h"
+#include "hcnng_utils.h"
 #include "parlay/parallel.h"
 #include "parlay/primitives.h"
 #include "parlay/random.h"
-#include "hcnng_utils.h"
 
 namespace parlayANN {
-
-
 
 struct DisjointSet {
   parlay::sequence<int> parent;
@@ -149,10 +147,11 @@ struct hcnng_index {
     });
   }
 
-    // robustPrune routine as found in DiskANN paper, with the exception that the
+  // robustPrune routine as found in DiskANN paper, with the exception that the
   // new candidate set is added to the field new_nbhs instead of directly
   // replacing the out_nbh of p
-  static void robustPrune(indexType p, PR &Points, GraphI &G, double alpha, size_t degree) {
+  static void robustPrune(indexType p, PR &Points, GraphI &G, double alpha,
+                          size_t degree) {
     // add out neighbors of p to the candidate set.
     parlay::sequence<pid> candidates;
     for (size_t i = 0; i < G[p].size(); i++) {
@@ -167,8 +166,7 @@ struct hcnng_index {
     parlay::sequence<int> new_nbhs = parlay::sequence<int>();
 
     size_t candidate_idx = 0;
-    while (new_nbhs.size() < degree &&
-           candidate_idx < candidates.size()) {
+    while (new_nbhs.size() < degree && candidate_idx < candidates.size()) {
       // Don't need to do modifications.
       indexType p_star = candidates[candidate_idx].first;
       candidate_idx++;
@@ -190,8 +188,9 @@ struct hcnng_index {
     G[p].update_neighbors(new_nbhs);
   }
 
-
-  static std::pair<size_t,size_t> greedyShape(indexType p, indexType r, PR &Points, GraphI &G, parlay::sequence<size_t> &active_indices) {
+  static std::pair<size_t, size_t> greedyShape(
+      indexType p, indexType r, PR &Points, GraphI &G,
+      parlay::sequence<size_t> &active_indices) {
     auto curr = r;
     std::vector<indexType> path;
     std::set<indexType> visited;
@@ -207,7 +206,9 @@ struct hcnng_index {
       indexType next = kNullId;
       for (size_t i = 0; i < G[curr].size(); i++) {
         auto nbh = G[curr][i];
-        if (std::find(active_indices.begin(), active_indices.end(), nbh) != active_indices.end() && visited.find(nbh) == visited.end()) {
+        if (std::find(active_indices.begin(), active_indices.end(), nbh) !=
+                active_indices.end() &&
+            visited.find(nbh) == visited.end()) {
           auto dist = Points[p].distance(Points[nbh]);
           if (dist < min) {
             min = dist;
@@ -232,17 +233,19 @@ struct hcnng_index {
       }
     }
     // last_node_on_path is the node incident to p on the path
-    //last_node_on_path = path[path.size() - 2];
+    // last_node_on_path = path[path.size() - 2];
 
-    // if back-tracking happened, then add edge from the backtrack node to p and remove the edge from the last node on the path to p
+    // if back-tracking happened, then add edge from the backtrack node to p and
+    // remove the edge from the last node on the path to p
     if (backtracked) {
       G[first_backtrack].append_neighbor(p);
       return std::make_pair(first_backtrack, p);
       // for (size_t i = 0; i < G[last_node_on_path].size(); i++) {
       //   if (G[last_node_on_path][i] == p) {
-      //     G[last_node_on_path][i] = G[last_node_on_path][G[last_node_on_path].size() - 1];
-      //     G[last_node_on_path].update_neighbors(parlay::make_slice(G[last_node_on_path], G[last_node_on_path].size() - 1));
-      //     break;
+      //     G[last_node_on_path][i] =
+      //     G[last_node_on_path][G[last_node_on_path].size() - 1];
+      //     G[last_node_on_path].update_neighbors(parlay::make_slice(G[last_node_on_path],
+      //     G[last_node_on_path].size() - 1)); break;
       //   }
       // }
     }
@@ -251,10 +254,11 @@ struct hcnng_index {
 
   // parameters dim and K are just to interface with the cluster tree code
   static void VamanaLeaf(GraphI &G, PR &Points,
-                         parlay::sequence<uint32_t> &active_indices, long MSTDeg) {
+                         parlay::sequence<uint32_t> &active_indices,
+                         long MSTDeg) {
     BuildParams BP;
     BP.R = MSTDeg;
-    BP.L = MSTDeg*5;
+    BP.L = MSTDeg * 5;
     BP.alpha = 1.1;
     BP.num_passes = 2;
     BP.single_batch = 0;
@@ -267,7 +271,6 @@ struct hcnng_index {
 
     leaf_count++;
   }
-
 
   // parameters dim and K are just to interface with the cluster tree code
   static void MSTk(GraphI &G, PR &Points,
@@ -350,7 +353,8 @@ struct hcnng_index {
   }
 
   void build_index(GraphI &G, PR &Points, long cluster_rounds,
-                   long cluster_size, long MSTDeg, bool multi_pivot, bool prune, bool mst_k, long prune_degree) {
+                   long cluster_size, long MSTDeg, bool multi_pivot, bool prune,
+                   bool mst_k, long prune_degree) {
     cluster<Point, PointRange, indexType> C;
     start_points.push_back(0);
     C.MSTDeg = MSTDeg;
@@ -359,7 +363,8 @@ struct hcnng_index {
     if (mst_k) {
       C.multiple_clustertrees(G, Points, cluster_size, cluster_rounds, MSTk);
     } else {
-      C.multiple_clustertrees(G, Points, cluster_size, cluster_rounds, VamanaLeaf);
+      C.multiple_clustertrees(G, Points, cluster_size, cluster_rounds,
+                              VamanaLeaf);
     }
     std::cout << "Total start points = " << start_points.size() << std::endl;
 
@@ -375,7 +380,9 @@ struct hcnng_index {
 
     start_points.clear();
     if (prune) {
-      parlay::parallel_for(0, G.size(), [&] (size_t i){robustPrune(i, Points, G, 1.1, prune_degree);});
+      parlay::parallel_for(0, G.size(), [&](size_t i) {
+        robustPrune(i, Points, G, 1.1, prune_degree);
+      });
     }
   }
 };

@@ -292,7 +292,7 @@ struct cluster {
   size_t MIN_CLUSTER_SIZE = 50;
   size_t MAX_MERGED_CLUSTER_SIZE = 2500;
   int REPETITIONS = 3;
-  int FANOUT = 3;
+  int FANOUT = 1;
   int MAX_DEPTH = 14;
   int CONCERNING_DEPTH = 10;
   double TOO_SMALL_SHRINKAGE_FRACTION = 0.8;

@@ -56,6 +56,9 @@ auto run_vamana_on_indices(Seq &seq, PR &all_points, BuildParams &BP) {
   parlay::sequence<edge> edges;
   for (size_t i=0; i < G.size(); ++i) {
     size_t our_ind = seq[i];
+    if (our_ind == 0) {
+      std::cout << "Got point 0" << std::endl;
+    }
     for (size_t j=0; j < G[i].size(); ++j) {
       auto neighbor_ind = seq[G[i][j]];
       edges.push_back(std::make_pair(our_ind, neighbor_ind));

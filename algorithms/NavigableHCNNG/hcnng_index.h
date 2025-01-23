@@ -117,10 +117,10 @@ struct hcnng_index {
                    long cluster_size, long MSTDeg, bool multi_pivot, bool prune, bool prune_all, double alpha,
                    bool mst_k, long prune_degree, bool vamana_long_range, double top_level_pct, long top_level_leaders) {
     cluster<Point, PointRange, indexType> C;
-    C.start_points.push_back(0);
+    C.START_POINTS.push_back(0);
     C.MSTDeg = MSTDeg;
     C.MULTI_PIVOT = multi_pivot;
-    C.alpha = alpha;
+    C.ALPHA = alpha;
     C.MAX_CLUSTER_SIZE=cluster_size;
     C.MAX_MERGED_CLUSTER_SIZE=cluster_size;
 		C.TOP_LEVEL_NUM_LEADERS = top_level_leaders;
@@ -136,7 +136,7 @@ struct hcnng_index {
     C.multiple_clustertrees(G, Points, cluster_size, cluster_rounds);
 
     if (vamana_long_range) {
-      std::cout << "Total start points = " << C.start_points.size() << std::endl;
+      std::cout << "Total start points = " << C.START_POINTS.size() << std::endl;
       std::cout << "Adding long range edges using Vamana" << std::endl;
       BuildParams BP;
       BP.R = 40;
@@ -152,19 +152,19 @@ struct hcnng_index {
         std::sample(ids.begin(), ids.end(), extra_pts.begin(), extra_pts.size(), prng);
         std::cout << "Sampled an extra: " << extra_pts.size() << " start points." << std::endl;
         for (auto top : extra_pts)  {
-          C.start_points.push_back(top);
+          C.START_POINTS.push_back(top);
         }
       }
 
       // Remove duplicates from start points (points could be added as
       // start points multiple times in different replicas).
-      C.start_points = parlay::remove_duplicates(C.start_points);
-      auto edges = run_vamana_on_indices(C.start_points, Points, BP);
+      C.START_POINTS = parlay::remove_duplicates(C.START_POINTS);
+      auto edges = run_vamana_on_indices(C.START_POINTS, Points, BP);
       utils::process_edges(G, std::move(edges));
       utils::remove_all_duplicates(G);
     }
 
-    C.start_points.clear();
+    C.START_POINTS.clear();
     if (prune) {
       parlay::parallel_for(0, G.size(), [&](size_t i) {
         if (prune_all || G[i].size() > prune_degree) {

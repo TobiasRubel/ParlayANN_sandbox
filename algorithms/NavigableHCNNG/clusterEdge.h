@@ -132,8 +132,8 @@ struct cluster {
 
   void random_clustering_wrapper(GraphI &G, PR &Points, size_t cluster_size) {
     std::random_device rd;
-    std::mt19937 rng(seed);
-    seed = parlay::hash64(seed);
+    std::mt19937 rng(SEED);
+    SEED = parlay::hash64(SEED);
     std::uniform_int_distribution<int> uni(0, Points.size());
     parlay::random rnd(uni(rng));
     auto ids = parlay::tabulate(Points.size(), [&](uint32_t i) { return i; });
@@ -275,8 +275,8 @@ struct cluster {
     auto ids = parlay::tabulate(Points.size(), [&](uint32_t i) { return i; });
     parlay::internal::timer t;
     t.start();
-    auto buckets = RecursivelySketch(Points, ids, cluster_size, 0, /*fanout=*/1, seed);
-		seed = parlay::hash64(seed);
+    auto buckets = RecursivelySketch(Points, ids, cluster_size, 0, /*fanout=*/1, SEED);
+		SEED = parlay::hash64(SEED);
     t.next("buckets time");
     std::cout << "Computed buckets!" << std::endl;
     // Build on each bucket.
@@ -314,9 +314,9 @@ struct cluster {
   void VamanaLeaf(GraphI &G, PR &Points,
                          parlay::sequence<uint32_t> &active_indices) {
     BuildParams BP;
-    BP.R = MSTDeg;
-    BP.L = MSTDeg * 2;
-    BP.alpha = alpha;
+    BP.R = MST_DEG;
+    BP.L = MST_DEG * 2;
+    BP.alpha = ALPHA;
     BP.num_passes = 2;
     BP.single_batch = 0;
 
@@ -324,7 +324,7 @@ struct cluster {
     utils::process_edges(G, std::move(edges));
 
     lock.lock();
-    start_points.push_back(active_indices[0]);
+    START_POINTS.push_back(active_indices[0]);
     lock.unlock();
 
     leaf_count++;
@@ -334,7 +334,7 @@ struct cluster {
   void MSTk(GraphI &G, PR &Points,
                    parlay::sequence<uint32_t> &active_indices) {
     lock.lock();
-    start_points.push_back(active_indices[0]);
+    START_POINTS.push_back(active_indices[0]);
 
     double extra_fraction = 0.01;
 
@@ -391,7 +391,7 @@ struct cluster {
       labelled_edge e_l = candidate_edges[i];
       edge e = e_l.first;
       if ((disjset.find(e.first) != disjset.find(e.second)) &&
-          (degrees[e.first] < MSTDeg) && (degrees[e.second] < MSTDeg)) {
+          (degrees[e.first] < MST_DEG) && (degrees[e.second] < MST_DEG)) {
         MST_edges.push_back(
             std::make_pair(active_indices[e.first], active_indices[e.second]));
         MST_edges.push_back(
@@ -411,7 +411,7 @@ struct cluster {
   }
 
 
-  size_t seed = 555;
+  size_t SEED = 555;
   double FRACTION_LEADERS = 0.005;
   size_t TOP_LEVEL_NUM_LEADERS = 950;
   size_t MAX_NUM_LEADERS = 1500;
@@ -421,15 +421,15 @@ struct cluster {
   int MAX_DEPTH = 14;
   int CONCERNING_DEPTH = 10;
   double TOO_SMALL_SHRINKAGE_FRACTION = 0.8;
-  size_t MSTDeg = 3;
+  size_t MST_DEG = 3;
   // Set to true to do k-way pivoting
   bool MULTI_PIVOT = false;
-  double alpha = 1;
+  double ALPHA = 1;
   std::string LEAF_ALG = "VamanaLeaf";
 
   // Horrible hacks. Fix.
   SpinLock lock;
-  parlay::sequence<uint32_t> start_points;
+  parlay::sequence<uint32_t> START_POINTS;
 };
 
 }  // namespace parlayANN

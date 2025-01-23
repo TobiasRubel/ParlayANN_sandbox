@@ -155,12 +155,11 @@ auto run_vamana_on_indices(Seq &seq, PR &all_points, BuildParams &BP, bool paral
     using findex = knn_index<PR, PR, indexType>;
     findex I(BP);
     stats<unsigned int> BuildStats(G.size());
-    I.robust_prune_index(G, points, points, BuildStats, true, false);
-//    if (parallel) {
-//      I.build_index(G, points, points, BuildStats, /*sort_neighbors=*/true, /*print=*/false);
-//    } else {
-//      I.build_index_seq(G, points, points, BuildStats, /*sort_neighbors=*/true, /*print=*/false);
-//    }
+    if (parallel) {
+      I.build_index(G, points, points, BuildStats, /*sort_neighbors=*/true, /*print=*/false);
+    } else {
+      I.build_index_seq(G, points, points, BuildStats, /*sort_neighbors=*/true, /*print=*/false);
+    }
     for (size_t i=0; i < G.size(); ++i) {
       size_t our_ind = seq[i];
       if (our_ind == 0) {
@@ -177,6 +176,29 @@ auto run_vamana_on_indices(Seq &seq, PR &all_points, BuildParams &BP, bool paral
     }
   }
 
+  return edges;
+}
+
+template <typename PR, typename Seq>
+auto run_quadprune_on_indices(Seq &seq, PR &all_points, BuildParams &BP, bool parallel=true) {
+  using indexType = uint32_t;
+  Graph<indexType> G(BP.R, seq.size());
+
+  using edge = std::pair<uint32_t, uint32_t>;
+  parlay::sequence<edge> edges;
+
+  PR points = PR(all_points, seq);
+  using findex = knn_index<PR, PR, indexType>;
+  findex I(BP);
+  stats<unsigned int> BuildStats(G.size());
+  I.robust_prune_index(G, points, points, BuildStats, true, false);
+  for (size_t i=0; i < G.size(); ++i) {
+    size_t our_ind = seq[i];
+    for (size_t j=0; j < G[i].size(); ++j) {
+      auto neighbor_ind = seq[G[i][j]];
+      edges.push_back(std::make_pair(our_ind, neighbor_ind));
+    }
+  }
   return edges;
 }
 

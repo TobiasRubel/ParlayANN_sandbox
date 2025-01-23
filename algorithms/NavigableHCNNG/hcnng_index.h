@@ -115,7 +115,7 @@ struct hcnng_index {
 
   void build_index(GraphI &G, PR &Points, long cluster_rounds,
                    long cluster_size, long MSTDeg, bool multi_pivot, bool prune, bool prune_all, double alpha,
-                   bool mst_k, long prune_degree, bool vamana_long_range, double top_level_pct, long top_level_leaders) {
+                   std::string leaf_method, long prune_degree, bool vamana_long_range, double top_level_pct, long top_level_leaders) {
     cluster<Point, PointRange, indexType> C;
     C.START_POINTS.push_back(0);
     C.MST_DEG = MSTDeg;
@@ -125,14 +125,7 @@ struct hcnng_index {
     C.MAX_MERGED_CLUSTER_SIZE=cluster_size;
 		C.TOP_LEVEL_NUM_LEADERS = top_level_leaders;
     std::cout << "Set MSTDeg to: " << MSTDeg << " MultiPivot to: " << multi_pivot << std::endl;
-
-    if (mst_k) {
-      std::cout << "Using MSTk" << std::endl;
-      C.LEAF_ALG = "MSTk";
-    } else {
-      std::cout << "Using VamanaLeaf" << std::endl;
-      C.LEAF_ALG = "VamanaLeaf";
-    }
+    C.LEAF_ALG = leaf_method;
     C.multiple_clustertrees(G, Points, cluster_size, cluster_rounds);
 
     if (vamana_long_range) {

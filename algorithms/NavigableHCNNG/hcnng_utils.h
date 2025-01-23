@@ -40,6 +40,102 @@
 
 namespace parlayANN {
 
+template <typename Point, typename PointRange, typename indexType>
+struct cluster_utils {
+  using distanceType = typename Point::distanceType;
+  using edge = std::pair<indexType, indexType>;
+  using pid = std::pair<indexType, distanceType>;
+  using GraphI = Graph<indexType>;
+  using PR = PointRange;
+
+  static constexpr indexType kNullId = std::numeric_limits<indexType>::max();
+  static constexpr distanceType kNullDist =
+      std::numeric_limits<distanceType>::max();
+  using labelled_edge = std::pair<edge, distanceType>;
+  static constexpr labelled_edge kNullEdge = {{kNullId, kNullId}, kNullDist};
+
+  // robustPrune routine as found in DiskANN paper, with the exception that the
+  // new candidate set is added to the field new_nbhs instead of directly
+  // replacing the out_nbh of p
+  static void robustPrune(indexType p, PR &Points, GraphI &G, double alpha,
+                          size_t degree) {
+    // add out neighbors of p to the candidate set.
+    std::vector<pid> candidates;
+    for (size_t i = 0; i < G[p].size(); i++) {
+      candidates.push_back(std::make_pair(G[p][i], Points[G[p][i]].distance(Points[p])));
+    }
+
+    // Sort the candidate set in reverse order according to distance from p.
+    auto less = [&](pid a, pid b) { 
+      return a.second < b.second || (a.second == b.second && a.first < b.first);
+    };
+    std::sort(candidates.begin(), candidates.end(), less);
+
+    // remove any duplicates
+    auto new_end =std::unique(candidates.begin(), candidates.end(),
+			      [&] (auto x, auto y) {return x.first == y.first;});
+    candidates = std::vector(candidates.begin(), new_end);
+
+    std::vector<int> new_nbhs;
+    new_nbhs.reserve(degree);
+
+    size_t candidate_idx = 0;
+    while (new_nbhs.size() < degree && candidate_idx < candidates.size()) {
+      // Don't need to do modifications.
+      indexType p_star = candidates[candidate_idx].first;
+      candidate_idx++;
+      if (p_star == p || p_star == kNullId) continue;
+
+      new_nbhs.push_back(p_star);
+
+      for (size_t i = candidate_idx; i < candidates.size(); i++) {
+        indexType p_prime = candidates[i].first;
+        if (p_prime != kNullId) {
+          distanceType dist_starprime =
+              Points[p_star].distance(Points[p_prime]);
+          distanceType dist_pprime = candidates[i].second;
+          if (alpha * dist_starprime <= dist_pprime)
+            candidates[i].first = kNullId;
+        }
+      }
+    }
+    G[p].update_neighbors(new_nbhs);
+  }
+
+  // inserts each edge after checking for duplicates
+  static void process_edges(GraphI &G, parlay::sequence<edge> edges) {
+    long maxDeg = G.max_degree();
+    auto grouped = parlay::group_by_key(edges);
+    parlay::parallel_for(0, grouped.size(), [&](size_t i) {
+      int32_t index = grouped[i].first;
+      for (auto c : grouped[i].second) {
+        if (G[index].size() < maxDeg) {
+          G[index].append_neighbor(c);
+        } else {
+          remove_edge_duplicates(index, G);
+          G[index].append_neighbor(c);
+        }
+      }
+    });
+  }
+
+  static void remove_edge_duplicates(indexType p, GraphI &G) {
+    parlay::sequence<indexType> points;
+    for (indexType i = 0; i < G[p].size(); i++) {
+      points.push_back(G[p][i]);
+    }
+    auto np = parlay::remove_duplicates(points);
+    G[p].update_neighbors(np);
+  }
+
+  static void remove_all_duplicates(GraphI &G) {
+    parlay::parallel_for(0, G.size(),
+                         [&](size_t i) { remove_edge_duplicates(i, G); });
+  }
+
+};
+
+
 template <typename PR, typename Seq>
 auto run_vamana_on_indices(Seq &seq, PR &all_points, BuildParams &BP, bool parallel=true) {
   using indexType = uint32_t;
@@ -109,6 +205,68 @@ public:
 private:
     std::atomic_flag spinner = ATOMIC_FLAG_INIT;
 };
+
+
+struct DisjointSet {
+  parlay::sequence<int> parent;
+  parlay::sequence<int> rank;
+  size_t N;
+
+  DisjointSet(size_t size) {
+    N = size;
+    parent = parlay::sequence<int>(N);
+    rank = parlay::sequence<int>(N);
+    parlay::parallel_for(0, N, [&](size_t i) {
+      parent[i] = i;
+      rank[i] = 0;
+    });
+  }
+
+  void _union(int x, int y) {
+    int xroot = parent[x];
+    int yroot = parent[y];
+    int xrank = rank[x];
+    int yrank = rank[y];
+    if (xroot == yroot)
+      return;
+    else if (xrank < yrank)
+      parent[xroot] = yroot;
+    else {
+      parent[yroot] = xroot;
+      if (xrank == yrank) rank[xroot] = rank[xroot] + 1;
+    }
+  }
+
+  int find(int x) {
+    if (parent[x] == x) return x;
+    int c = x;
+    while (parent[c] != c) {
+      c = parent[c];
+    }
+    while (x != c) {
+      int s = parent[x];
+      parent[x] = c;
+      x = s;
+    }
+    return c;
+  }
+
+  void flatten() {
+    for (int i = 0; i < N; i++) find(i);
+  }
+
+  bool is_full() {
+    flatten();
+    parlay::sequence<bool> truthvals(N);
+    parlay::parallel_for(
+        0, N, [&](size_t i) { truthvals[i] = (parent[i] == parent[0]); });
+    auto ff = [&](bool a) { return not a; };
+    auto filtered = parlay::filter(truthvals, ff);
+    if (filtered.size() == 0) return true;
+    return false;
+  }
+};
+
 
 
 

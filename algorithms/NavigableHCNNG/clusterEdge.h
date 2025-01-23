@@ -60,6 +60,10 @@ struct cluster {
   using GraphI = Graph<indexType>;
   using PR = PointRange;
   using Bucket = parlay::sequence<uint32_t>;
+  static constexpr indexType kNullId = std::numeric_limits<indexType>::max();
+  static constexpr distanceType kNullDist =
+      std::numeric_limits<distanceType>::max();
+  static constexpr labelled_edge kNullEdge = {{kNullId, kNullId}, kNullDist};
 
   cluster() {}
 
@@ -67,9 +71,8 @@ struct cluster {
     return (N * (N - 1) - (N - i) * (N - i - 1)) / 2;
   }
 
-  template <typename F>
   void recurse(GraphI &G, PR &Points, parlay::sequence<uint32_t> &ids,
-               parlay::random &rnd, size_t cluster_size, F f, indexType first,
+               parlay::random &rnd, size_t cluster_size, indexType first,
                indexType second) {
     // Split points based on which of the two points are closer.
     auto closer_first =
@@ -91,20 +94,18 @@ struct cluster {
 
     parlay::par_do(
         [&]() {
-          random_clustering(G, Points, closer_first, left_rnd, cluster_size, f);
+          random_clustering(G, Points, closer_first, left_rnd, cluster_size);
         },
         [&]() {
-          random_clustering(G, Points, closer_second, right_rnd, cluster_size,
-                            f);
+          random_clustering(G, Points, closer_second, right_rnd, cluster_size);
         });
   }
 
-  template <typename F>
   void random_clustering(GraphI &G, PR &Points, parlay::sequence<uint32_t> &ids,
-                         parlay::random &rnd, size_t cluster_size, F g) {
-    if (ids.size() <= cluster_size)
-      g(G, Points, ids, MSTDeg, alpha);
-    else {
+                         parlay::random &rnd, size_t cluster_size) {
+    if (ids.size() <= cluster_size) {
+      RunLeaf(G, Points, ids);
+    } else {
       auto [f, s] = select_two_random(ids, rnd);
       if (Points[f] == Points[s]) {
         parlay::sequence<uint32_t> closer_first;
@@ -119,22 +120,19 @@ struct cluster {
         auto right_rnd = rnd.fork(1);
         parlay::par_do(
             [&]() {
-              random_clustering(G, Points, closer_first, left_rnd, cluster_size,
-                                g);
+              random_clustering(G, Points, closer_first, left_rnd, cluster_size);
             },
             [&]() {
               random_clustering(G, Points, closer_second, right_rnd,
-                                cluster_size, g);
+                                cluster_size);
             });
       } else {
-        recurse(G, Points, ids, rnd, cluster_size, g, f, s);
+        recurse(G, Points, ids, rnd, cluster_size, f, s);
       }
     }
   }
 
-  template <typename F>
-  void random_clustering_wrapper(GraphI &G, PR &Points, size_t cluster_size,
-                                 F f) {
+  void random_clustering_wrapper(GraphI &G, PR &Points, size_t cluster_size) {
     std::random_device rd;
     std::mt19937 rng(seed);
     seed = parlay::hash64(seed);
@@ -143,7 +141,7 @@ struct cluster {
     auto ids = parlay::tabulate(Points.size(), [&](uint32_t i) { return i; });
 		parlay::internal::timer t;
 		t.start();
-    random_clustering(G, Points, ids, rnd, cluster_size, f);
+    random_clustering(G, Points, ids, rnd, cluster_size);
 		t.next("tree time");
   }
 
@@ -271,9 +269,7 @@ struct cluster {
     return buckets;
   }
 
-  template <typename F>
-  auto recursively_sketch_wrapper(GraphI &G, PR &Points, size_t cluster_size,
-                                  F f) {
+  auto recursively_sketch_wrapper(GraphI &G, PR &Points, size_t cluster_size) {
     std::random_device rd;
     std::mt19937 rng(rd());
     std::uniform_int_distribution<int> uni(0, Points.size());
@@ -287,23 +283,161 @@ struct cluster {
     std::cout << "Computed buckets!" << std::endl;
     // Build on each bucket.
     parlay::parallel_for(0, buckets.size(),
-                         [&](size_t i) { f(G, Points, buckets[i], MSTDeg, alpha); });
+                         [&](size_t i) {
+                           RunLeaf(G, Points, buckets[i]);
+                         });
     t.next("build leaf time");
   }
 
-  template <typename F>
   void multiple_clustertrees(GraphI &G, PR &Points, long cluster_size,
-                             long num_clusters, F f) {
+                             long num_clusters) {
     for (long i = 0; i < num_clusters; i++) {
       if (MULTI_PIVOT) {
-        recursively_sketch_wrapper(G, Points, cluster_size, f);
+        recursively_sketch_wrapper(G, Points, cluster_size);
       } else {
-        random_clustering_wrapper(G, Points, cluster_size, f);
+        random_clustering_wrapper(G, Points, cluster_size);
       }
       std::cout << "Built cluster " << i << " of " << num_clusters << std::endl;
       std::cout << "Leaf count: " << leaf_count << std::endl;
     }
   }
+
+  /*  Leaf code  */
+  // parameters dim and K are just to interface with the cluster tree code
+ 
+  void RunLeaf(GraphI &G, PR &Points, parlay::sequence<uint32_t> &active_indices) {
+    if (LEAF_ALG == "VamanaLeaf") {
+      VamanaLeaf(G, Points, active_indices);
+    } else if (LEAF_ALG == "MSTk") {
+      MSTk(G, Points, active_indices);
+    }
+  }
+
+  void VamanaLeaf(GraphI &G, PR &Points,
+                         parlay::sequence<uint32_t> &active_indices) {
+    BuildParams BP;
+    BP.R = MSTDeg;
+    BP.L = MSTDeg * 2;
+    BP.alpha = alpha;
+    BP.num_passes = 2;
+    BP.single_batch = 0;
+
+    auto edges = run_vamana_on_indices(active_indices, Points, BP, /*parallel=*/true);
+    process_edges(G, std::move(edges));
+
+    lock.lock();
+    start_points.push_back(active_indices[0]);
+    lock.unlock();
+
+    leaf_count++;
+  }
+
+  static void remove_edge_duplicates(indexType p, GraphI &G) {
+    parlay::sequence<indexType> points;
+    for (indexType i = 0; i < G[p].size(); i++) {
+      points.push_back(G[p][i]);
+    }
+    auto np = parlay::remove_duplicates(points);
+    G[p].update_neighbors(np);
+  }
+
+  // inserts each edge after checking for duplicates
+  static void process_edges(GraphI &G, parlay::sequence<edge> edges) {
+    long maxDeg = G.max_degree();
+    auto grouped = parlay::group_by_key(edges);
+    parlay::parallel_for(0, grouped.size(), [&](size_t i) {
+      int32_t index = grouped[i].first;
+      for (auto c : grouped[i].second) {
+        if (G[index].size() < maxDeg) {
+          G[index].append_neighbor(c);
+        } else {
+          remove_edge_duplicates(index, G);
+          G[index].append_neighbor(c);
+        }
+      }
+    });
+  }
+
+  // parameters dim and K are just to interface with the cluster tree code
+  void MSTk(GraphI &G, PR &Points,
+                   parlay::sequence<uint32_t> &active_indices) {
+    lock.lock();
+    start_points.push_back(active_indices[0]);
+
+    double extra_fraction = 0.01;
+
+    //std::mt19937 prng(parlay::hash64(active_indices[0]));
+    //std::sample(active_indices.begin(), active_indices.end(), leaders.begin(), leaders.size(), prng);
+    lock.unlock();
+
+    // preprocessing for Kruskal's
+    size_t N = active_indices.size();
+    long dim = Points.dimension();
+    DisjointSet disjset(N);
+    size_t m = 10;
+    auto less = [&](labelled_edge a, labelled_edge b) {
+      return a.second < b.second;
+    };
+    parlay::sequence<labelled_edge> candidate_edges(N * m, kNullEdge);
+    parlay::parallel_for(0, N, [&](size_t i) {
+      std::priority_queue<labelled_edge, std::vector<labelled_edge>,
+                          decltype(less)>
+          Q(less);
+      for (indexType j = i + 1; j < N; j++) {
+        distanceType dist_ij =
+            Points[active_indices[i]].distance(Points[active_indices[j]]);
+        if (Q.size() >= m) {
+          distanceType topdist = Q.top().second;
+          if (dist_ij < topdist) {
+            labelled_edge e;
+            e = std::make_pair(std::make_pair(i, j), dist_ij);
+            Q.pop();
+            Q.push(e);
+          }
+        } else {
+          labelled_edge e;
+          e = std::make_pair(std::make_pair(i, j), dist_ij);
+          Q.push(e);
+        }
+      }
+      indexType limit = std::min(Q.size(), m);
+      for (indexType j = 0; j < limit; j++) {
+        candidate_edges[i * m + j] = Q.top();
+        Q.pop();
+      }
+    });
+
+    parlay::sort_inplace(candidate_edges, less);
+
+    auto degrees =
+        parlay::tabulate(active_indices.size(), [&](size_t i) { return 0; });
+    parlay::sequence<edge> MST_edges = parlay::sequence<edge>();
+    // modified Kruskal's algorithm
+    for (indexType i = 0; i < candidate_edges.size(); i++) {
+      // Since we sorted, any null edges form the suffix.
+      if (candidate_edges[i].second == kNullDist) break;
+      labelled_edge e_l = candidate_edges[i];
+      edge e = e_l.first;
+      if ((disjset.find(e.first) != disjset.find(e.second)) &&
+          (degrees[e.first] < MSTDeg) && (degrees[e.second] < MSTDeg)) {
+        MST_edges.push_back(
+            std::make_pair(active_indices[e.first], active_indices[e.second]));
+        MST_edges.push_back(
+            std::make_pair(active_indices[e.second], active_indices[e.first]));
+        degrees[e.first] += 1;
+        degrees[e.second] += 1;
+        disjset._union(e.first, e.second);
+      }
+      if (i % N == 0) {
+        if (disjset.is_full()) {
+          break;
+        }
+      }
+    }
+    process_edges(G, std::move(MST_edges));
+    leaf_count++;
+  }
+
 
   size_t seed = 555;
   double FRACTION_LEADERS = 0.005;
@@ -319,6 +453,11 @@ struct cluster {
   // Set to true to do k-way pivoting
   bool MULTI_PIVOT = false;
   double alpha = 1;
+  std::string LEAF_ALG = "VamanaLeaf";
+
+  // Horrible hacks. Fix.
+  SpinLock lock;
+  parlay::sequence<uint32_t> start_points;
 };
 
 }  // namespace parlayANN

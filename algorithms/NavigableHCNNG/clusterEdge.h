@@ -321,39 +321,13 @@ struct cluster {
     BP.single_batch = 0;
 
     auto edges = run_vamana_on_indices(active_indices, Points, BP, /*parallel=*/true);
-    process_edges(G, std::move(edges));
+    utils::process_edges(G, std::move(edges));
 
     lock.lock();
     start_points.push_back(active_indices[0]);
     lock.unlock();
 
     leaf_count++;
-  }
-
-  static void remove_edge_duplicates(indexType p, GraphI &G) {
-    parlay::sequence<indexType> points;
-    for (indexType i = 0; i < G[p].size(); i++) {
-      points.push_back(G[p][i]);
-    }
-    auto np = parlay::remove_duplicates(points);
-    G[p].update_neighbors(np);
-  }
-
-  // inserts each edge after checking for duplicates
-  static void process_edges(GraphI &G, parlay::sequence<edge> edges) {
-    long maxDeg = G.max_degree();
-    auto grouped = parlay::group_by_key(edges);
-    parlay::parallel_for(0, grouped.size(), [&](size_t i) {
-      int32_t index = grouped[i].first;
-      for (auto c : grouped[i].second) {
-        if (G[index].size() < maxDeg) {
-          G[index].append_neighbor(c);
-        } else {
-          remove_edge_duplicates(index, G);
-          G[index].append_neighbor(c);
-        }
-      }
-    });
   }
 
   // parameters dim and K are just to interface with the cluster tree code
@@ -432,7 +406,7 @@ struct cluster {
         }
       }
     }
-    process_edges(G, std::move(MST_edges));
+    utils::process_edges(G, std::move(MST_edges));
     leaf_count++;
   }
 

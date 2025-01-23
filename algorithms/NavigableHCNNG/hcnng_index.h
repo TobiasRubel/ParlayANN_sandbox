@@ -118,7 +118,7 @@ struct hcnng_index {
                    bool mst_k, long prune_degree, bool vamana_long_range, double top_level_pct, long top_level_leaders) {
     cluster<Point, PointRange, indexType> C;
     C.START_POINTS.push_back(0);
-    C.MSTDeg = MSTDeg;
+    C.MST_DEG = MSTDeg;
     C.MULTI_PIVOT = multi_pivot;
     C.ALPHA = alpha;
     C.MAX_CLUSTER_SIZE=cluster_size;

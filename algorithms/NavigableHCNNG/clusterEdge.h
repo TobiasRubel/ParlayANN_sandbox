@@ -60,10 +60,8 @@ struct cluster {
   using GraphI = Graph<indexType>;
   using PR = PointRange;
   using Bucket = parlay::sequence<uint32_t>;
-  static constexpr indexType kNullId = std::numeric_limits<indexType>::max();
-  static constexpr distanceType kNullDist =
-      std::numeric_limits<distanceType>::max();
-  static constexpr labelled_edge kNullEdge = {{kNullId, kNullId}, kNullDist};
+
+  using utils = cluster_utils<Point, PointRange, indexType>;
 
   cluster() {}
 
@@ -378,7 +376,7 @@ struct cluster {
     auto less = [&](labelled_edge a, labelled_edge b) {
       return a.second < b.second;
     };
-    parlay::sequence<labelled_edge> candidate_edges(N * m, kNullEdge);
+    parlay::sequence<labelled_edge> candidate_edges(N * m, utils::kNullEdge);
     parlay::parallel_for(0, N, [&](size_t i) {
       std::priority_queue<labelled_edge, std::vector<labelled_edge>,
                           decltype(less)>
@@ -415,7 +413,7 @@ struct cluster {
     // modified Kruskal's algorithm
     for (indexType i = 0; i < candidate_edges.size(); i++) {
       // Since we sorted, any null edges form the suffix.
-      if (candidate_edges[i].second == kNullDist) break;
+      if (candidate_edges[i].second == utils::kNullDist) break;
       labelled_edge e_l = candidate_edges[i];
       edge e = e_l.first;
       if ((disjset.find(e.first) != disjset.find(e.second)) &&

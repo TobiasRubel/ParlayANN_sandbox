@@ -103,7 +103,7 @@ struct cluster {
   void random_clustering(GraphI &G, PR &Points, parlay::sequence<uint32_t> &ids,
                          parlay::random &rnd, size_t cluster_size, F g) {
     if (ids.size() <= cluster_size)
-      g(G, Points, ids, MSTDeg);
+      g(G, Points, ids, MSTDeg, alpha);
     else {
       auto [f, s] = select_two_random(ids, rnd);
       if (Points[f] == Points[s]) {
@@ -141,27 +141,32 @@ struct cluster {
     std::uniform_int_distribution<int> uni(0, Points.size());
     parlay::random rnd(uni(rng));
     auto ids = parlay::tabulate(Points.size(), [&](uint32_t i) { return i; });
+		parlay::internal::timer t;
+		t.start();
     random_clustering(G, Points, ids, rnd, cluster_size, f);
+		t.next("tree time");
   }
 
   // Returns a collection of leaf buckets.
   std::vector<Bucket> RecursivelySketch(PR &Points, Bucket &ids,
                                         long cluster_size, int depth,
-                                        int fanout) {
-    //		std::cout << "In recursively sketch, ids.size = " << ids.size() << "
-    //cluster size = " << cluster_size << std::endl;
+                                        int fanout, size_t seed) {
     if (ids.size() <= cluster_size) {
       return {ids};
     }
 
     // sample leaders
     size_t num_leaders =
-        depth == 0 ? TOP_LEVEL_NUM_LEADERS : ids.size() * FRACTION_LEADERS;
+        (depth == 0) ? TOP_LEVEL_NUM_LEADERS : ids.size() * FRACTION_LEADERS;
+    //if (depth < 5 && TOP_LEVEL_NUM_LEADERS < num_leaders) {
+    //  num_leaders = TOP_LEVEL_NUM_LEADERS;
+    //}
     num_leaders = std::min<size_t>(num_leaders, MAX_NUM_LEADERS);
     num_leaders = std::max<size_t>(num_leaders, 3);
+
     Bucket leaders(num_leaders);
     std::mt19937 prng(seed);
-    seed = parlay::hash64(seed);
+    size_t next_seed = parlay::hash64(seed);
     std::sample(ids.begin(), ids.end(), leaders.begin(), leaders.size(), prng);
 
     //		std::cout << "after sampling: leaders size " << leaders.size() <<
@@ -170,6 +175,8 @@ struct cluster {
     std::vector<Bucket> clusters(leaders.size());
     //		std::cout << "Computing clusters" << std::endl;
 
+		parlay::internal::timer t;
+		t.start();
     {  // less readable than map + zip + flatten, but at least it's as efficient
        // as possible for fanout = 1
       parlay::sequence<std::pair<uint32_t, uint32_t>> flat(ids.size() * fanout);
@@ -190,15 +197,18 @@ struct cluster {
       });
     }
     //		std::cout << "Assigned to closest leaders" << std::endl;
+		if (depth == 0) {
+			t.next("first level assign time");
+		}
 
     leaders.clear();
-    // TODO: clear leader_points PR.
 
     std::vector<Bucket> buckets;
     std::sort(
         clusters.begin(), clusters.end(),
         [&](const auto &b1, const auto &b2) { return b1.size() > b2.size(); });
     // Merge
+    size_t iter = 0;
     while (!clusters.empty() && clusters.back().size() < MIN_CLUSTER_SIZE) {
       if (buckets.empty() || clusters.back().size() + buckets.back().size() >
                                  MAX_MERGED_CLUSTER_SIZE) {
@@ -218,7 +228,7 @@ struct cluster {
     //		std::cout << "Done merging" << std::endl;
 
     // recurse on clusters
-    SpinLock bucket_lock;
+    parlay::sequence<std::vector<Bucket>> rec_buckets(clusters.size());
     parlay::parallel_for(
         0, clusters.size(),
         [&](size_t cluster_id) {
@@ -234,7 +244,9 @@ struct cluster {
             std::shuffle(ids_copy.begin(), ids_copy.end(), prng);
             for (size_t i = 0; i < ids_copy.size(); i += MAX_CLUSTER_SIZE) {
               auto &new_bucket = recursive_buckets.emplace_back();
-              for (size_t j = 0; j < MAX_CLUSTER_SIZE; ++j) {
+              size_t start = i;
+              size_t end = std::min(start + MAX_CLUSTER_SIZE, ids_copy.size());
+              for (size_t j = i; j < end; ++j) {
                 new_bucket.push_back(ids_copy[j]);
               }
             }
@@ -242,15 +254,19 @@ struct cluster {
             // The normal case
             recursive_buckets =
                 RecursivelySketch(Points, clusters[cluster_id], cluster_size,
-                                  depth + 1, /*fanout=*/1);
+                                  depth + 1, /*fanout=*/1, next_seed + cluster_id);
           }
-
-          bucket_lock.lock();
-          buckets.insert(buckets.end(), recursive_buckets.begin(),
-                         recursive_buckets.end());
-          bucket_lock.unlock();
+          rec_buckets[cluster_id] = std::move(recursive_buckets);
         },
         1);
+
+    for (size_t cluster_id=0; cluster_id < clusters.size(); ++cluster_id) {
+      while (!rec_buckets[cluster_id].empty()) {
+        size_t index = rec_buckets[cluster_id].size();
+        buckets.push_back(std::move(rec_buckets[cluster_id][index-1]));
+        rec_buckets[cluster_id].pop_back();
+      }
+    }
 
     return buckets;
   }
@@ -263,11 +279,16 @@ struct cluster {
     std::uniform_int_distribution<int> uni(0, Points.size());
     parlay::random rnd(uni(rng));
     auto ids = parlay::tabulate(Points.size(), [&](uint32_t i) { return i; });
-    auto buckets = RecursivelySketch(Points, ids, cluster_size, 0, FANOUT);
+    parlay::internal::timer t;
+    t.start();
+    auto buckets = RecursivelySketch(Points, ids, cluster_size, 0, /*fanout=*/1, seed);
+		seed = parlay::hash64(seed);
+    t.next("buckets time");
     std::cout << "Computed buckets!" << std::endl;
     // Build on each bucket.
     parlay::parallel_for(0, buckets.size(),
-                         [&](size_t i) { f(G, Points, buckets[i], MSTDeg); });
+                         [&](size_t i) { f(G, Points, buckets[i], MSTDeg, alpha); });
+    t.next("build leaf time");
   }
 
   template <typename F>
@@ -289,16 +310,15 @@ struct cluster {
   size_t TOP_LEVEL_NUM_LEADERS = 950;
   size_t MAX_NUM_LEADERS = 1500;
   size_t MAX_CLUSTER_SIZE = 5000;
-  size_t MIN_CLUSTER_SIZE = 50;
+  size_t MIN_CLUSTER_SIZE = 500;
   size_t MAX_MERGED_CLUSTER_SIZE = 2500;
-  int REPETITIONS = 3;
-  int FANOUT = 1;
   int MAX_DEPTH = 14;
   int CONCERNING_DEPTH = 10;
   double TOO_SMALL_SHRINKAGE_FRACTION = 0.8;
   size_t MSTDeg = 3;
   // Set to true to do k-way pivoting
   bool MULTI_PIVOT = false;
+  double alpha = 1;
 };
 
 }  // namespace parlayANN

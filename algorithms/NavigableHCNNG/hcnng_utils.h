@@ -41,31 +41,43 @@
 namespace parlayANN {
 
 template <typename PR, typename Seq>
-auto run_vamana_on_indices(Seq &seq, PR &all_points, BuildParams &BP) {
+auto run_vamana_on_indices(Seq &seq, PR &all_points, BuildParams &BP, bool parallel=true) {
   using indexType = uint32_t;
   Graph<indexType> G(BP.R, seq.size());
 
-  PR points = PR(all_points, seq);
-
-  using findex = knn_index<PR, PR, indexType>;
-  findex I(BP);
-  stats<unsigned int> BuildStats(G.size());
-  I.build_index(G, points, points, BuildStats, /*sort_neighbors=*/true, /*print=*/false);
-
   using edge = std::pair<uint32_t, uint32_t>;
   parlay::sequence<edge> edges;
-  for (size_t i=0; i < G.size(); ++i) {
-    size_t our_ind = seq[i];
-    if (our_ind == 0) {
-      std::cout << "Got point 0" << std::endl;
-    }
-    for (size_t j=0; j < G[i].size(); ++j) {
-      auto neighbor_ind = seq[G[i][j]];
-      edges.push_back(std::make_pair(our_ind, neighbor_ind));
-    }
-    if (G[i].size() > BP.R) {
-      std::cout << "point: " << i << " exceeded max degree... " << std::endl;
-      exit(0);
+
+  for (size_t pass=0; pass<1; ++pass) {
+    //std::sort(seq.begin(), seq.end());
+
+    std::mt19937 prng(pass);
+    std::shuffle(seq.begin(), seq.end(), prng);
+  
+    PR points = PR(all_points, seq);
+
+    using findex = knn_index<PR, PR, indexType>;
+    findex I(BP);
+    stats<unsigned int> BuildStats(G.size());
+    I.robust_prune_index(G, points, points, BuildStats, true, false);
+//    if (parallel) {
+//      I.build_index(G, points, points, BuildStats, /*sort_neighbors=*/true, /*print=*/false);
+//    } else {
+//      I.build_index_seq(G, points, points, BuildStats, /*sort_neighbors=*/true, /*print=*/false);
+//    }
+    for (size_t i=0; i < G.size(); ++i) {
+      size_t our_ind = seq[i];
+      if (our_ind == 0) {
+        std::cout << "Got point 0" << std::endl;
+      }
+      for (size_t j=0; j < G[i].size(); ++j) {
+        auto neighbor_ind = seq[G[i][j]];
+        edges.push_back(std::make_pair(our_ind, neighbor_ind));
+      }
+      if (G[i].size() > BP.R) {
+        std::cout << "point: " << i << " exceeded max degree... " << std::endl;
+        exit(0);
+      }
     }
   }
 

@@ -153,17 +153,24 @@ struct hcnng_index {
   static void robustPrune(indexType p, PR &Points, GraphI &G, double alpha,
                           size_t degree) {
     // add out neighbors of p to the candidate set.
-    parlay::sequence<pid> candidates;
+    std::vector<pid> candidates;
     for (size_t i = 0; i < G[p].size(); i++) {
-      candidates.push_back(
-          std::make_pair(G[p][i], Points[p].distance(Points[G[p][i]])));
+      candidates.push_back(std::make_pair(G[p][i], Points[G[p][i]].distance(Points[p])));
     }
 
     // Sort the candidate set in reverse order according to distance from p.
-    auto less = [&](pid a, pid b) { return a.second < b.second; };
-    parlay::sort_inplace(candidates, less);
+    auto less = [&](pid a, pid b) { 
+      return a.second < b.second || (a.second == b.second && a.first < b.first);
+    };
+    std::sort(candidates.begin(), candidates.end(), less);
 
-    parlay::sequence<int> new_nbhs = parlay::sequence<int>();
+    // remove any duplicates
+    auto new_end =std::unique(candidates.begin(), candidates.end(),
+			      [&] (auto x, auto y) {return x.first == y.first;});
+    candidates = std::vector(candidates.begin(), new_end);
+
+    std::vector<int> new_nbhs;
+    new_nbhs.reserve(degree);
 
     size_t candidate_idx = 0;
     while (new_nbhs.size() < degree && candidate_idx < candidates.size()) {
@@ -255,14 +262,15 @@ struct hcnng_index {
   // parameters dim and K are just to interface with the cluster tree code
   static void VamanaLeaf(GraphI &G, PR &Points,
                          parlay::sequence<uint32_t> &active_indices,
-                         long MSTDeg) {
+                         long MSTDeg, double alpha) {
     BuildParams BP;
     BP.R = MSTDeg;
-    BP.L = MSTDeg * 5;
-    BP.alpha = 1.1;
+    BP.L = MSTDeg * 2;
+    BP.alpha = alpha;
     BP.num_passes = 2;
     BP.single_batch = 0;
-    auto edges = run_vamana_on_indices(active_indices, Points, BP);
+
+    auto edges = run_vamana_on_indices(active_indices, Points, BP, /*parallel=*/true);
     process_edges(G, std::move(edges));
 
     lock.lock();
@@ -274,14 +282,13 @@ struct hcnng_index {
 
   // parameters dim and K are just to interface with the cluster tree code
   static void MSTk(GraphI &G, PR &Points,
-                   parlay::sequence<uint32_t> &active_indices, long MSTDeg) {
+                   parlay::sequence<uint32_t> &active_indices, long MSTDeg, double alpha) {
     lock.lock();
     start_points.push_back(active_indices[0]);
     double extra_fraction = 0.01;
 
     //std::mt19937 prng(parlay::hash64(active_indices[0]));
     //std::sample(active_indices.begin(), active_indices.end(), leaders.begin(), leaders.size(), prng);
-
     lock.unlock();
 
     // preprocessing for Kruskal's
@@ -353,12 +360,16 @@ struct hcnng_index {
   }
 
   void build_index(GraphI &G, PR &Points, long cluster_rounds,
-                   long cluster_size, long MSTDeg, bool multi_pivot, bool prune,
-                   bool mst_k, long prune_degree, bool vamana_long_range, double top_level_pct) {
+                   long cluster_size, long MSTDeg, bool multi_pivot, bool prune, bool prune_all, double alpha,
+                   bool mst_k, long prune_degree, bool vamana_long_range, double top_level_pct, long top_level_leaders) {
     cluster<Point, PointRange, indexType> C;
     start_points.push_back(0);
     C.MSTDeg = MSTDeg;
     C.MULTI_PIVOT = multi_pivot;
+    C.alpha = alpha;
+    C.MAX_CLUSTER_SIZE=cluster_size;
+    C.MAX_MERGED_CLUSTER_SIZE=cluster_size;
+		C.TOP_LEVEL_NUM_LEADERS = top_level_leaders;
     std::cout << "Set MSTDeg to: " << MSTDeg << " MultiPivot to: " << multi_pivot << std::endl;
 
     if (mst_k) {
@@ -370,25 +381,27 @@ struct hcnng_index {
                               VamanaLeaf);
     }
 
-
     if (vamana_long_range) {
       std::cout << "Total start points = " << start_points.size() << std::endl;
       std::cout << "Adding long range edges using Vamana" << std::endl;
       BuildParams BP;
       BP.R = 40;
       BP.L = 200;
-      BP.alpha = 1.1;
+      BP.alpha = alpha;
       BP.num_passes = 3;
       BP.single_batch = 0;
 
-      std::mt19937 prng(0);
-      auto ids = parlay::tabulate(Points.size(), [&](uint32_t i) { return i; });
-      std::vector<uint32_t> extra_pts(G.size() * top_level_pct);
-      std::sample(ids.begin(), ids.end(), extra_pts.begin(), extra_pts.size(), prng);
-      for (auto top : extra_pts)  {
-        start_points.push_back(top);
+      if (top_level_pct > 0) {
+        std::mt19937 prng(0);
+        auto ids = parlay::tabulate(Points.size(), [&](uint32_t i) { return i; });
+        std::vector<uint32_t> extra_pts(G.size() * top_level_pct);
+        std::sample(ids.begin(), ids.end(), extra_pts.begin(), extra_pts.size(), prng);
+        std::cout << "Sampled an extra: " << extra_pts.size() << " start points." << std::endl;
+        for (auto top : extra_pts)  {
+          start_points.push_back(top);
+        }
       }
-  
+
       // Remove duplicates from start points (points could be added as
       // start points multiple times in different replicas).
       start_points = parlay::remove_duplicates(start_points);
@@ -400,7 +413,9 @@ struct hcnng_index {
     start_points.clear();
     if (prune) {
       parlay::parallel_for(0, G.size(), [&](size_t i) {
-        robustPrune(i, Points, G, 1.1, prune_degree);
+        if (prune_all || G[i].size() > prune_degree) {
+          robustPrune(i, Points, G, alpha, prune_degree);
+        }
       });
     }
   }

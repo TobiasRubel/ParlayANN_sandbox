@@ -51,14 +51,14 @@ template<typename Point, typename PointRange, typename indexType>
 void timeNeighbors(Graph<indexType> &G,
 		   PointRange &Query_Points, long k,
 		   BuildParams &BP, char* outFile,
-		   groundTruth<indexType> GT, char* res_file, char* exp_prefix, bool graph_built, PointRange &Points)
+		   groundTruth<indexType> GT, char* res_file, char* exp_prefix, bool graph_built, PointRange &Points, commandLine& P)
 {
 
 
     time_loop(1, 0,
       [&] () {},
       [&] () {
-        ANN<Point, PointRange, indexType>(G, k, BP, Query_Points, GT, res_file, exp_prefix, graph_built, Points);
+        ANN<Point, PointRange, indexType>(G, k, BP, Query_Points, GT, res_file, exp_prefix, graph_built, Points, P);
       },
       [&] () {});
 
@@ -90,6 +90,7 @@ int main(int argc, char* argv[]) {
   if(R<0) P.badArgument();
   long L = P.getOptionIntValue("-L", 0);
   if(L<0) P.badArgument();
+  long pivot_type = P.getOptionIntValue("-pivot_type", 0);
   long MST_deg = P.getOptionIntValue("-mst_deg", 0);
   if(MST_deg < 0) P.badArgument();
   long num_clusters = P.getOptionIntValue("-num_clusters", 0);
@@ -124,7 +125,8 @@ int main(int argc, char* argv[]) {
   std::string df = std::string(dfc);
   std::string tp = std::string(vectype);
 
-  BuildParams BP = BuildParams(R, L, alpha, num_passes, num_clusters, cluster_size, MST_deg, delta, verbose, quantize_build, radius, radius_2, self, range, single_batch, Q, trim, rerank_factor);
+  // std::string kAlgType = ANNInfo::kAlgType;
+  BuildParams BP = BuildParams(kAlgType, R, L, alpha, num_passes, num_clusters, cluster_size, MST_deg, delta, pivot_type, verbose, quantize_build, radius, radius_2, self, range, single_batch, Q, trim, rerank_factor);
   long maxDeg = BP.max_degree();
 
   if((tp != "uint8") && (tp != "int8") && (tp != "float")){
@@ -162,18 +164,18 @@ int main(int argc, char* argv[]) {
         using PR = PointRange<QPoint>;
         PR Points_(Points);
         PR Query_Points_(Query_Points, Points_.params);
-        timeNeighbors<QPoint, PR, uint>(G, Query_Points_, k, BP, oFile, GT, rFile, exp_prefix, graph_built, Points_);
+        timeNeighbors<QPoint, PR, uint>(G, Query_Points_, k, BP, oFile, GT, rFile, exp_prefix, graph_built, Points_, P);
       } else if (quantize == 16) {
         std::cout << "quantizing data to 2 bytes" << std::endl;
         using Point = Euclidian_Point<uint16_t>;
         using PR = PointRange<Point>;
         PR Points_(Points);
         PR Query_Points_(Query_Points, Points_.params);
-        timeNeighbors<Point, PR, uint>(G, Query_Points_, k, BP, oFile, GT, rFile, exp_prefix, graph_built, Points_);
+        timeNeighbors<Point, PR, uint>(G, Query_Points_, k, BP, oFile, GT, rFile, exp_prefix, graph_built, Points_, P);
       } else {
         using Point = Euclidian_Point<float>;
         using PR = PointRange<Point>;
-        timeNeighbors<Point, PR, uint>(G, Query_Points, k, BP, oFile, GT, rFile, exp_prefix, graph_built, Points);
+        timeNeighbors<Point, PR, uint>(G, Query_Points, k, BP, oFile, GT, rFile, exp_prefix, graph_built, Points, P);
       }
     } else if(df == "mips"){
       PointRange<Mips_Point<float>> Points(iFile);
@@ -195,7 +197,7 @@ int main(int argc, char* argv[]) {
         using PR = PointRange<Point>;
         PR Points_(Points);
         PR Query_Points_(Query_Points, Points_.params);
-        timeNeighbors<Point, PR, uint>(G, Query_Points_, k, BP, oFile, GT, rFile, exp_prefix, graph_built, Points_);
+        timeNeighbors<Point, PR, uint>(G, Query_Points_, k, BP, oFile, GT, rFile, exp_prefix, graph_built, Points_, P);
       } else if (quantize == 16) {
         std::cout << "quantizing data to 2 bytes" << std::endl;
         using QT = int16_t;
@@ -203,11 +205,11 @@ int main(int argc, char* argv[]) {
         using PR = PointRange<Point>;
         PR Points_(Points);
         PR Query_Points_(Query_Points, Points_.params);
-        timeNeighbors<Point, PR, uint>(G, Query_Points_, k, BP, oFile, GT, rFile, exp_prefix, graph_built, Points_);
+        timeNeighbors<Point, PR, uint>(G, Query_Points_, k, BP, oFile, GT, rFile, exp_prefix, graph_built, Points_, P);
       } else {
         using Point = Mips_Point<float>;
         using PR = PointRange<Point>;
-        timeNeighbors<Point, PR, uint>(G, Query_Points, k, BP, oFile, GT, rFile, exp_prefix, graph_built, Points);
+        timeNeighbors<Point, PR, uint>(G, Query_Points, k, BP, oFile, GT, rFile, exp_prefix, graph_built, Points, P);
       }
     }
   } else if(tp == "uint8"){
@@ -218,7 +220,7 @@ int main(int argc, char* argv[]) {
       if(gFile == NULL) G = Graph<unsigned int>(maxDeg, Points.size());
       else G = Graph<unsigned int>(gFile);
       timeNeighbors<Euclidian_Point<uint8_t>, PointRange<Euclidian_Point<uint8_t>>, uint>(G, Query_Points, k, BP, 
-        oFile, GT, rFile, exp_prefix, graph_built, Points);
+        oFile, GT, rFile, exp_prefix, graph_built, Points, P);
     } else if(df == "mips"){
       PointRange<Mips_Point<uint8_t>> Points(iFile);
       PointRange<Mips_Point<uint8_t>> Query_Points(qFile);
@@ -226,7 +228,7 @@ int main(int argc, char* argv[]) {
       if(gFile == NULL) G = Graph<unsigned int>(maxDeg, Points.size());
       else G = Graph<unsigned int>(gFile);
       timeNeighbors<Mips_Point<uint8_t>, PointRange<Mips_Point<uint8_t>>, uint>(G, Query_Points, k, BP, 
-        oFile, GT, rFile, exp_prefix, graph_built, Points);
+        oFile, GT, rFile, exp_prefix, graph_built, Points, P);
     }
   } else if(tp == "int8"){
     if(df == "Euclidian"){
@@ -236,7 +238,7 @@ int main(int argc, char* argv[]) {
       if(gFile == NULL) G = Graph<unsigned int>(maxDeg, Points.size());
       else G = Graph<unsigned int>(gFile);
       timeNeighbors<Euclidian_Point<int8_t>, PointRange<Euclidian_Point<int8_t>>, uint>(G, Query_Points, k, BP,
-        oFile, GT, rFile, exp_prefix, graph_built, Points);
+        oFile, GT, rFile, exp_prefix, graph_built, Points, P);
     } else if(df == "mips"){
       PointRange<Mips_Point<int8_t>> Points(iFile);
       PointRange<Mips_Point<int8_t>> Query_Points(qFile);
@@ -244,7 +246,7 @@ int main(int argc, char* argv[]) {
       if(gFile == NULL) G = Graph<unsigned int>(maxDeg, Points.size());
       else G = Graph<unsigned int>(gFile);
       timeNeighbors<Mips_Point<int8_t>, PointRange<Mips_Point<int8_t>>, uint>(G, Query_Points, k, BP,
-        oFile, GT, rFile, exp_prefix, graph_built, Points);
+        oFile, GT, rFile, exp_prefix, graph_built, Points, P);
     }
   }
   

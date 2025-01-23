@@ -37,33 +37,40 @@
 
 namespace parlayANN {
 
-static std::string kAlgType = "HCNNG";
+static std::string kAlgType = "NavHCNNG";
 
 template<typename Point, typename PointRange, typename indexType>
 void ANN(Graph<indexType> &G, long k, BuildParams &BP,
          PointRange &Query_Points,
          groundTruth<indexType> GT, char *res_file, char* exp_prefix,
-         bool graph_built, PointRange &Points, commandLine &P) {
+         bool graph_built, PointRange &Points, commandLine& P) {
 
   parlay::internal::timer t("ANN"); 
   using findex = hcnng_index<Point, PointRange, indexType>;
 
-  // Only used if pivot_type = 5
-  long num_pivots = P.getOptionLongValue("-num_pivots", 32);
+  bool multi_pivot = P.getOption("-multi_pivot");
+  std::string leaf_method = P.getOptionValue("-leaf_method", "QuadPrune");
+  bool vamana_long_range = P.getOption("-vamana_long_range");
+  double top_level_pct = P.getOptionDoubleValue("-top_level_pct", 0.005);
+  bool prune = P.getOption("-prune");
+  bool prune_all = P.getOption("-prune_all");
+	long top_level_leaders = P.getOptionLongValue("-top_level_leaders", 950);
+  double alpha = P.getOptionDoubleValue("-alpha", 1.1);
+  long prune_degree = P.getOptionLongValue("-prune_degree", std::numeric_limits<long>::max());
+
   double idx_time;
   if(!graph_built){
     findex I;
-    I.build_index(G, Points, BP.num_clusters, BP.cluster_size, BP.MST_deg, BP.pivot_type, num_pivots);
+    I.build_index(G, Points, BP.num_clusters, BP.cluster_size, BP.MST_deg, multi_pivot, prune, prune_all, alpha, leaf_method, prune_degree, vamana_long_range, top_level_pct, top_level_leaders);
     idx_time = t.next_time();
   } else{idx_time=0;}
-  std::string name = "HCNNG";
+  std::string name = "NavHCNNG";
   std::string params = "Trees = " + std::to_string(BP.num_clusters);
   auto [avg_deg, max_deg] = graph_stats_(G);
   Graph_ G_(name, params, G.size(), avg_deg, max_deg, idx_time);
   G_.print();
   if(Query_Points.size() != 0)
-    //search_and_parse(G_, G, Points, Query_Points, GT, res_file, exp_prefix, k, BP.verbose);
-    search_and_parse(G_, G, Points, Query_Points, Points, Query_Points, Points, Query_Points, GT, res_file, exp_prefix, k, true, 0u, BP.verbose, 0);
+    search_and_parse(G_, G, Points, Query_Points, GT, res_file, exp_prefix, k, BP.verbose);
 }
 
 } // end namespace

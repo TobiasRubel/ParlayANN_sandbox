@@ -31,14 +31,17 @@
 #include "../utils/stats.h"
 #include "../utils/parse_results.h"
 #include "../utils/check_nn_recall.h"
+#include "../bench/parse_command_line.h"
 
 namespace parlayANN {
+
+static std::string kAlgType = "pyNNDescent";
 
 template<typename Point, typename PointRange, typename indexType>
 void ANN(Graph<indexType> &G, long k, BuildParams &BP,
          PointRange &Query_Points,
          groundTruth<indexType> GT, char *res_file, char* exp_prefix,
-         bool graph_built, PointRange &Points) {
+         bool graph_built, PointRange &Points, commandLine &P) {
   parlay::internal::timer t("ANN"); 
   {
     using findex = pyNN_index<Point, PointRange, indexType>;

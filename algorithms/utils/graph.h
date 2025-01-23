@@ -61,7 +61,7 @@ struct edgeRange{
 
   void append_neighbor(indexType nbh){
     if (edges[0] == maxDeg) {
-      std::cout << "ERROR in append_neighbor: cannot exceed max degree "
+      std::cout << "ERROR in append_neighbor for: " << id_ << ". Cannot exceed max degree "
                 << maxDeg << std::endl;
       abort();
     } else {

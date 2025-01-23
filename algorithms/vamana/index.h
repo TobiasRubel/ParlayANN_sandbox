@@ -148,14 +148,14 @@ struct knn_index {
   void set_start(){start_point = 0;}
 
   void build_index(GraphI &G, PR &Points, QPR &QPoints,
-                   stats<indexType> &BuildStats, bool sort_neighbors = true){
-    std::cout << "Building graph..." << std::endl;
+                   stats<indexType> &BuildStats, bool sort_neighbors = true, bool print = true){
+    if (print) std::cout << "Building graph..." << std::endl;
     set_start();
     parlay::sequence<indexType> inserts = parlay::tabulate(Points.size(), [&] (size_t i){
       return static_cast<indexType>(i);});
     if (BP.single_batch != 0) {
       int degree = BP.single_batch;
-      std::cout << "Using single batch per round with " << degree << " random start edges" << std::endl;
+      if (print) std::cout << "Using single batch per round with " << degree << " random start edges" << std::endl;
       parlay::random_generator gen;
       std::uniform_int_distribution<long> dis(0, G.size());
       parlay::parallel_for(0, G.size(), [&] (long i) {
@@ -169,12 +169,12 @@ struct knn_index {
     }
 
     // last pass uses alpha
-    std::cout << "number of passes = " << BP.num_passes << std::endl;
+    if (print) std::cout << "number of passes = " << BP.num_passes << std::endl;
     for (int i=0; i < BP.num_passes; i++) {
       if (i == BP.num_passes - 1)
-        batch_insert(inserts, G, Points, QPoints, BuildStats, BP.alpha, true, 2, .02);
+        batch_insert(inserts, G, Points, QPoints, BuildStats, BP.alpha, true, 2, .02, print);
       else
-        batch_insert(inserts, G, Points, QPoints, BuildStats, 1.0, true, 2, .02);
+        batch_insert(inserts, G, Points, QPoints, BuildStats, 1.0, true, 2, .02, print);
     }
 
     if (sort_neighbors) {
@@ -182,6 +182,78 @@ struct knn_index {
         auto less = [&] (indexType j, indexType k) {
           return Points[i].distance(Points[j]) < Points[i].distance(Points[k]);};
         G[i].sort(less);});
+    }
+  }
+
+  void build_index_seq(GraphI &G, PR &Points, QPR &QPoints,
+                   stats<indexType> &BuildStats, bool sort_neighbors = true, bool print = true) {
+    set_start();
+    for (int pass=0; pass < BP.num_passes; pass++) {
+			for (size_t i=1; i < Points.size(); ++i) {
+				if (pass == BP.num_passes - 1) {
+					sequential_insert(i, 0, G, Points, QPoints, BuildStats, BP.alpha);
+				} else {
+					sequential_insert(i, 0, G, Points, QPoints, BuildStats, 1.0);
+				}
+			}
+		}
+
+    if (sort_neighbors) {
+      for (size_t i=0; i<G.size(); ++i) {
+        auto less = [&] (indexType j, indexType k) {
+          return Points[i].distance(Points[j]) < Points[i].distance(Points[k]);};
+        G[i].sort(less);
+			}
+    }
+	}
+
+  void robust_prune_index(GraphI &G, PR &Points, QPR &QPoints,
+                   stats<indexType> &BuildStats, bool sort_neighbors = true, bool print = true) {
+    set_start();
+    auto candidates = parlay::tabulate(Points.size(), [&] (indexType i) { return i; });
+    for (size_t i=0; i < Points.size(); ++i) {
+      auto [neighbors, distance_comps] = robustPrune(i, candidates, G, Points, BP.alpha, true);
+      G[i].update_neighbors(neighbors);
+    }
+
+    if (sort_neighbors) {
+      for (size_t i=0; i<G.size(); ++i) {
+        auto less = [&] (indexType j, indexType k) {
+          return Points[i].distance(Points[j]) < Points[i].distance(Points[k]);};
+        G[i].sort(less);
+			}
+    }
+	}
+
+  void sequential_insert(indexType point, indexType start_point, GraphI& G, PR& Points, QPR& QPoints,
+                         stats<indexType>& BuildStats, double alpha) {
+    parlay::sequence<indexType> new_out;
+		QueryParams QP((long) 0, BP.L, (double) 0.0, (long) Points.size(), (long) G.max_degree());
+    auto [visited, bs_distance_comps] =
+      beam_search_rerank__<Point, QPoint, PR, QPR, indexType>(Points[point],
+                                                             QPoints[point],
+                                                             G,
+                                                             Points,
+                                                             QPoints,
+                                                             start_point,
+                                                             QP);
+    long rp_distance_comps;
+    std::tie(new_out, rp_distance_comps) = robustPrune(point, visited, G, Points, alpha);
+    BuildStats.increment_dist(point, rp_distance_comps);
+    G[point].update_neighbors(new_out);
+
+    for (size_t i=0; i < new_out.size(); ++i) {
+      indexType neighbor = new_out[i];
+			if (G[neighbor].size() + 1 <= BP.R) {
+				// just add the neighbor
+				G[neighbor].append_neighbor(point);
+			} else {
+				// prune with unquantized points.
+				parlay::sequence<pid> candidate = {std::make_pair(point, Points[point].distance(Points[neighbor]))};
+				auto [new_out, distance_comps] = robustPrune(neighbor, candidate, G, Points, alpha);
+        G[neighbor].update_neighbors(new_out);
+        BuildStats.increment_dist(point, distance_comps);
+			}
     }
   }
 
@@ -208,7 +280,7 @@ struct knn_index {
     //fix bug where max batch size could be set to zero
     if(max_batch_size == 0) max_batch_size = n;
     parlay::sequence<int> rperm;
-    if (random_order) 
+    if (random_order)
       rperm = parlay::random_permutation<int>(static_cast<int>(m));
     else
       rperm = parlay::tabulate(m, [&](int i) { return i; });
@@ -310,9 +382,11 @@ struct knn_index {
       }
       inc += 1;
     }
-    t_beam.total();
-    t_bidirect.total();
-    t_prune.total();
+    if (print) {
+      t_beam.total();
+      t_bidirect.total();
+      t_prune.total();
+    }
   }
 
 };

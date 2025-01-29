@@ -304,7 +304,6 @@ struct cluster {
   // parameters dim and K are just to interface with the cluster tree code
  
   void RunLeaf(GraphI &G, PR &Points, parlay::sequence<uint32_t> &active_indices) {
-    std::cout << LEAF_ALG << std::endl;
     if (LEAF_ALG == "VamanaLeaf") {
       VamanaLeaf(G, Points, active_indices);
     } else if (LEAF_ALG == "MSTk") {

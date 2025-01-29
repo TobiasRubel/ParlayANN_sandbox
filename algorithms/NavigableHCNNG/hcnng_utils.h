@@ -219,11 +219,13 @@ auto distmat_quadprune(Seq &seq, PR &all_points, BuildParams &BP, bool parallel=
 
   using distanceType = typename PR::Point::distanceType;
   auto dist_mat = new distanceType[seq.size() * seq.size()];
-  parlay::parallel_for(0, seq.size(), [&](size_t i) {
+  // parlay::parallel_for(0, seq.size(), [&](size_t i) {
+  for (size_t i = 0; i < seq.size(); ++i) {
     for (size_t j = 0; j < seq.size(); ++j) {
       dist_mat[i * seq.size() + j] = points[i].distance(points[j]);
     }
-  });
+  }
+  // });
   // Matrix is currently not triangular.
   // More distance computations but better cache locality.
   // std::cout << "Distance matrix generated: " << t.next_time() << std::endl;

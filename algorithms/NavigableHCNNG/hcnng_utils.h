@@ -219,9 +219,20 @@ auto distmat_quadprune(Seq &seq, PR &all_points, BuildParams &BP, bool parallel=
 
   using distanceType = typename PR::Point::distanceType;
   auto dist_mat = new distanceType[seq.size() * seq.size()];
-  for (size_t i = 0; i < seq.size(); ++i) {
-    for (size_t j = i + 1; j < seq.size(); ++j) {
-      dist_mat[i * seq.size() + j] = dist_mat[j * seq.size() + i] = points[i].distance(points[j]);
+  // for (size_t i = 0; i < seq.size(); ++i) {
+  //   for (size_t j = i + 1; j < seq.size(); ++j) {
+  //     dist_mat[i * seq.size() + j] = dist_mat[j * seq.size() + i] = points[i].distance(points[j]);
+  //   }
+  // }
+  for (size_t a = 0; a < 2; a++) {
+    size_t i_min = a * seq.size() / 2, i_max = (a + 1) * seq.size() / 2;
+    for (size_t b = a; b < 2; b++) {
+      size_t j_min = b * seq.size() / 2, j_max = (b + 1) * seq.size() / 2;
+      for (size_t i = i_min; i < i_max; ++i) {
+        for (size_t j = std::max(i + 1, j_min); j < j_max; ++j) {
+          dist_mat[i * seq.size() + j] = dist_mat[j * seq.size() + i] = points[i].distance(points[j]);
+        }
+      }
     }
   }
   // std::cout << "Distance matrix generated: " << t.next_time() << std::endl;

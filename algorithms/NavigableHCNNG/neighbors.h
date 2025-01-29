@@ -49,7 +49,7 @@ void ANN(Graph<indexType> &G, long k, BuildParams &BP,
   using findex = hcnng_index<Point, PointRange, indexType>;
 
   bool multi_pivot = P.getOption("-multi_pivot");
-  std::string leaf_method = P.getOptionValue("-leaf_method", "QuadPrune");
+  std::string leaf_method = P.getOptionValue("-leaf_method", "DistMatQuadPrune");
   bool vamana_long_range = P.getOption("-vamana_long_range");
   double top_level_pct = P.getOptionDoubleValue("-top_level_pct", 0.005);
   bool prune = P.getOption("-prune");
@@ -69,8 +69,9 @@ void ANN(Graph<indexType> &G, long k, BuildParams &BP,
   auto [avg_deg, max_deg] = graph_stats_(G);
   Graph_ G_(name, params, G.size(), avg_deg, max_deg, idx_time);
   G_.print();
+
   if(Query_Points.size() != 0)
     search_and_parse(G_, G, Points, Query_Points, GT, res_file, exp_prefix, k, BP.verbose);
 }
 
-} // end namespace
+}; // end namespace

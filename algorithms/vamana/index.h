@@ -259,6 +259,28 @@ struct knn_index {
     }
 	}
 
+  void distmat_robust_prune(GraphI &G, PR &Points, QPR &QPoints, distanceType *dist_mat,
+                   stats<indexType> &BuildStats, bool sort_neighbors = true, bool print = true) {
+    set_start();
+    for (size_t i=0; i < Points.size(); ++i) {
+      parlay::sequence<pid> cc;
+      cc.reserve(Points.size()); // + size_of(p->out_nbh));
+      for (size_t j=0; j<Points.size(); ++j) {
+        cc.push_back(std::make_pair(j, dist_mat[i * Points.size() + j]));
+      }
+      auto [neighbors, distance_comps] = robustPrune(i, cc, G, Points, BP.alpha, true, true);
+      G[i].update_neighbors(neighbors);
+    }
+
+    if (sort_neighbors) {
+      for (size_t i=0; i<G.size(); ++i) {
+        auto less = [&] (indexType j, indexType k) {
+          return Points[i].distance(Points[j]) < Points[i].distance(Points[k]);};
+        G[i].sort(less);
+      }
+    }
+  }
+
   void sequential_insert(indexType point, indexType start_point, GraphI& G, PR& Points, QPR& QPoints,
                          stats<indexType>& BuildStats, double alpha) {
     parlay::sequence<indexType> new_out;

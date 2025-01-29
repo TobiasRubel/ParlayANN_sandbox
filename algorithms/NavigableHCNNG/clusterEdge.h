@@ -304,12 +304,15 @@ struct cluster {
   // parameters dim and K are just to interface with the cluster tree code
  
   void RunLeaf(GraphI &G, PR &Points, parlay::sequence<uint32_t> &active_indices) {
+    std::cout << LEAF_ALG << std::endl;
     if (LEAF_ALG == "VamanaLeaf") {
       VamanaLeaf(G, Points, active_indices);
     } else if (LEAF_ALG == "MSTk") {
       MSTk(G, Points, active_indices);
     } else if (LEAF_ALG == "QuadPrune") {
       QuadPrune(G, Points, active_indices);
+    } else if (LEAF_ALG == "DistMatQuadPrune") {
+      DistMatQuadPrune(G, Points, active_indices);
     } else {
       std::cout << "Unknown leaf method: " << LEAF_ALG << std::endl;
       exit(0);
@@ -340,6 +343,21 @@ struct cluster {
     BP.R = MST_DEG;
     BP.alpha = ALPHA;
     auto edges = run_quadprune_on_indices(active_indices, Points, BP);
+    utils::process_edges(G, std::move(edges));
+
+    lock.lock();
+    START_POINTS.push_back(active_indices[0]);
+    lock.unlock();
+
+    leaf_count++;
+  }
+
+  void DistMatQuadPrune(GraphI &G, PR &Points,
+                       parlay::sequence<uint32_t> &active_indices) {
+    BuildParams BP;
+    BP.R = MST_DEG;
+    BP.alpha = ALPHA;
+    auto edges = distmat_quadprune(active_indices, Points, BP);
     utils::process_edges(G, std::move(edges));
 
     lock.lock();

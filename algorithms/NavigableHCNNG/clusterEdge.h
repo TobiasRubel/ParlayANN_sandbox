@@ -275,7 +275,7 @@ struct cluster {
     auto ids = parlay::tabulate(Points.size(), [&](uint32_t i) { return i; });
     parlay::internal::timer t;
     t.start();
-    auto buckets = RecursivelySketch(Points, ids, cluster_size, 0, /*fanout=*/1, SEED);
+    auto buckets = RecursivelySketch(Points, ids, cluster_size, 0, FANOUT, SEED);
 		SEED = parlay::hash64(SEED);
     t.next("buckets time");
     std::cout << "Computed buckets!" << std::endl;
@@ -458,6 +458,7 @@ struct cluster {
   int CONCERNING_DEPTH = 10;
   double TOO_SMALL_SHRINKAGE_FRACTION = 0.8;
   size_t MST_DEG = 3;
+  int FANOUT = 1;
   // Set to true to do k-way pivoting
   bool MULTI_PIVOT = false;
   double ALPHA = 1;

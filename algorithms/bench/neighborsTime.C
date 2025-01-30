@@ -110,6 +110,7 @@ int main(int argc, char* argv[]) {
   if(delta<0) P.badArgument();
   char* dfc = P.getOptionValue("-dist_func");
   int quantize = P.getOptionIntValue("-quantize_bits", 0);
+  int fanout = P.getOptionIntValue("-fanout", 1);
   int quantize_build = P.getOptionIntValue("-quantize_mode", 0);
   bool verbose = P.getOption("-verbose");
   bool normalize = P.getOption("-normalize");
@@ -126,7 +127,7 @@ int main(int argc, char* argv[]) {
   std::string tp = std::string(vectype);
 
   // std::string kAlgType = ANNInfo::kAlgType;
-  BuildParams BP = BuildParams(kAlgType, R, L, alpha, num_passes, num_clusters, cluster_size, MST_deg, delta, pivot_type, verbose, quantize_build, radius, radius_2, self, range, single_batch, Q, trim, rerank_factor);
+  BuildParams BP = BuildParams(kAlgType, R, L, alpha, num_passes, fanout, num_clusters, cluster_size, MST_deg, delta, pivot_type, verbose, quantize_build, radius, radius_2, self, range, single_batch, Q, trim, rerank_factor);
   long maxDeg = BP.max_degree();
 
   if((tp != "uint8") && (tp != "int8") && (tp != "float")){

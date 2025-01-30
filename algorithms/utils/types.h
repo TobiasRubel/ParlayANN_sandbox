@@ -157,6 +157,7 @@ struct BuildParams{
   double m_l = 0; // HNSW
   double alpha; //vamana and pyNNDescent
   int num_passes; //vamana
+  int fanout;
 
   long num_clusters; // HCNNG and pyNNDescent
   long cluster_size; //HCNNG and pyNNDescent
@@ -180,11 +181,11 @@ struct BuildParams{
 
   std::string alg_type;
 
-  BuildParams(std::string kAlgType, long R, long L, double a, int num_passes, long nc, long cs, long mst, double de,long pt,
+  BuildParams(std::string kAlgType, long R, long L, double a, int num_passes, int fanout, long nc, long cs, long mst, double de,long pt,
               bool verbose = false, int quantize = 0, double radius = 0.0, double radius_2 = 0.0,
               bool self = false, bool range = false, int single_batch = 0, long Q = 0, double trim = 0.0,
               int rerank_factor = 100)
-    : alg_type(kAlgType), R(R), L(L), alpha(a), num_passes(num_passes), num_clusters(nc), cluster_size(cs), MST_deg(mst), delta(de),
+    : alg_type(kAlgType), R(R), L(L), alpha(a), num_passes(num_passes), fanout(fanout), num_clusters(nc), cluster_size(cs), MST_deg(mst), delta(de),
       verbose(verbose), quantize(quantize), radius(radius), radius_2(radius_2), self(self), range(range), single_batch(single_batch), Q(Q), trim(trim), rerank_factor(rerank_factor), pivot_type(pt) { }
 
   BuildParams() {}
@@ -207,7 +208,7 @@ struct BuildParams{
 
   long max_degree() {
     if(alg_type == "HCNNG") return num_clusters*MST_deg;
-    else if(alg_type == "NavHCNNG")  return num_clusters*MST_deg + 40;
+    else if(alg_type == "NavHCNNG")  return num_clusters*MST_deg*fanout + 40;
     else if(alg_type == "HNSW")  return R*2;
     else return R;
   }

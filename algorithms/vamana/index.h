@@ -148,6 +148,63 @@ struct knn_index {
     return std::pair(new_neighbors_seq, distance_comps);
   }
 
+  // Prune using distance matrix. This is specialized code only called
+  // in the "all-prune" case and does not handle add/remove_dups, like
+  // the original code above.
+  std::pair<parlay::sequence<indexType>, long>
+  robustPruneDistMat(indexType p, std::vector<pid>& candidates, distanceType *dist_mat,
+                     PR &Points, double alpha, bool rem_dup = true) {
+    // add out neighbors of p to the candidate set.
+    long distance_comps = 0;
+    size_t N = Points.size();
+
+    // Sort the candidate set according to distance from p
+    auto less = [&](std::pair<indexType, distanceType> a, std::pair<indexType, distanceType> b) {
+      return a.second < b.second || (a.second == b.second && a.first < b.first);
+    };
+    std::sort(candidates.begin(), candidates.end(), less);
+
+    if (rem_dup) {
+      // remove any duplicates
+      auto new_end =std::unique(candidates.begin(), candidates.end(),
+  			      [&] (auto x, auto y) {return x.first == y.first;});
+      candidates = std::vector(candidates.begin(), new_end);
+    }
+
+    std::vector<indexType> new_nbhs;
+    new_nbhs.reserve(BP.R);
+
+    size_t candidate_idx = 0;
+
+    while (new_nbhs.size() < BP.R && candidate_idx < candidates.size()) {
+      // Don't need to do modifications.
+      int p_prime = candidates[candidate_idx].first;
+      // With this modification, p_star should not be -1.
+      if (p_prime == p || p_prime == -1) {
+        candidate_idx++;
+        continue;
+      }
+
+      // Check if p_prime is already pruned out based on what we have
+      // added so far.
+      bool add = true;
+      for (auto p_star : new_nbhs) {
+        distance_comps++;
+        distanceType dist_starprime =  dist_mat[p_prime*N + p_star];
+        distanceType dist_pprime = candidates[candidate_idx].second;
+        if (alpha * dist_starprime <= dist_pprime) {
+          add = false;
+          break;
+        }
+      }
+      if (add)  new_nbhs.push_back(p_prime);
+      candidate_idx++;
+    }
+
+    auto new_neighbors_seq = parlay::to_sequence(new_nbhs);
+    return std::pair(new_neighbors_seq, distance_comps);
+  }
+
 
   //wrapper to allow calling robustPrune on a sequence of candidates
   //that do not come with precomputed distances
@@ -263,12 +320,12 @@ struct knn_index {
                    stats<indexType> &BuildStats, bool sort_neighbors = true, bool print = true) {
     set_start();
     for (size_t i=0; i < Points.size(); ++i) {
-      parlay::sequence<pid> cc;
+      std::vector<pid> cc;
       cc.reserve(Points.size()); // + size_of(p->out_nbh));
       for (size_t j=0; j<Points.size(); ++j) {
         cc.push_back(std::make_pair(j, dist_mat[i * Points.size() + j]));
       }
-      auto [neighbors, distance_comps] = robustPrune(i, cc, G, Points, BP.alpha, true, true);
+      auto [neighbors, distance_comps] = robustPruneDistMat(i, cc, dist_mat, Points, BP.alpha);
       G[i].update_neighbors(neighbors);
     }
 

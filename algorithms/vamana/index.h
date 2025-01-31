@@ -153,7 +153,7 @@ struct knn_index {
   // the original code above.
   std::pair<parlay::sequence<indexType>, long>
   robustPruneDistMat(indexType p, std::vector<pid>& candidates, distanceType *dist_mat,
-                     PR &Points, double alpha, bool rem_dup = true) {
+                     PR &Points, double alpha) {
     // add out neighbors of p to the candidate set.
     long distance_comps = 0;
     size_t N = Points.size();
@@ -163,13 +163,6 @@ struct knn_index {
       return a.second < b.second || (a.second == b.second && a.first < b.first);
     };
     std::sort(candidates.begin(), candidates.end(), less);
-
-    if (rem_dup) {
-      // remove any duplicates
-      auto new_end =std::unique(candidates.begin(), candidates.end(),
-  			      [&] (auto x, auto y) {return x.first == y.first;});
-      candidates = std::vector(candidates.begin(), new_end);
-    }
 
     std::vector<indexType> new_nbhs;
     new_nbhs.reserve(BP.R);

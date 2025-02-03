@@ -36,6 +36,9 @@
 #include "parlay/primitives.h"
 #include "parlay/random.h"
 #include "topn.h"
+#include "../utils/beamSearch.h"
+#include "../utils/types.h"
+
 
 namespace parlayANN {
 
@@ -143,6 +146,193 @@ struct cluster {
 		t.next("tree time");
   }
 
+  std::vector<Bucket> PruneSLINK(PR &Points, Bucket &ids, size_t seed) {
+    // sample leaders
+    std::cout << "Leader sampling seed = " << seed << std::endl;
+
+    size_t num_leaders = TOP_LEVEL_NUM_LEADERS;
+    Bucket leaders(num_leaders);
+    std::mt19937 prng(seed);
+    //size_t next_seed = parlay::hash64(seed);
+    std::sample(ids.begin(), ids.end(), leaders.begin(), leaders.size(), prng);
+    std::vector<Bucket> clusters(leaders.size());
+    auto leader_points = PointRange(Points, leaders);
+    // std::cout << "buckets generated. # of leaders: " << clusters.size() << std::endl;
+    // for (auto l : leaders) {
+    //   std::cout << l << " ";
+    // }
+    // std::cout << std::endl;
+    // create RobustPrune graph on leaders
+    GraphI G(64,leaders.size());
+    auto leader_ids = parlay::tabulate(num_leaders, [&](uint32_t i) { return i; });
+    DistMatQuadPrune(G, leader_points,leader_ids);
+    QueryParams QP((long) 100, 100, (double) 1.0, (long) leaders.size(), (long) 64);
+    stats<indexType> s((size_t) Points.size());
+    //std::cout << "built graph on leaders..." << std::endl;
+    // get nearest neighbors for each point
+    auto bss = beamSearchRandom(Points, G, leader_points, s, QP);
+    parlay::sequence<std::pair<indexType,indexType>> flat = parlay::tabulate(Points.size(), [&](uint32_t i) { 
+      return std::make_pair(bss[i][0],i);
+      }); 
+
+    std::cout << "points assigned to their initial buckets..." << std::endl;
+    std::cout << "random sampling for debugging:..." << std::endl;
+    for (auto i = 0; i < 10; i++) {
+      std::cout << flat[i].first << " " << flat[i].second << std::endl;
+    }
+    auto pclusters = parlay::group_by_index(flat, leaders.size());
+    //std::cout << "clusters grouped by index..." << std::endl;
+
+    // copy clusters from parlay::sequence to std::vector
+    parlay::parallel_for(0, pclusters.size(), [&](size_t i) {
+      clusters[i] = Bucket(pclusters[i].begin(), pclusters[i].end());
+    });
+    std::cout << "initial clustering completed. merging..." << std::endl;
+
+    // merging step balances clusters by identifying those which are too big or too small and merging them into the
+    // nearest cluster which is available in a greedy fashion
+    auto k = 100;
+
+    // first merge big clusters down 
+    std::priority_queue<std::pair<int,int>> Qbig;
+    for (auto i = 0; i < clusters.size(); i++) {
+      int sz = clusters[i].size();
+      if (sz > MAX_CLUSTER_SIZE) {
+        Qbig.push(std::make_pair(sz, i));
+      }
+    }
+
+    while (!Qbig.empty()) {
+      // std::cout << "Qbig is of size: " << Qbig.size() << std::endl;
+      auto curr = Qbig.top();
+      Qbig.pop();
+      // If this cluster is no longer oversized, skip it.
+      if (clusters[curr.second].size() <= MAX_CLUSTER_SIZE) continue;
+      auto currid = curr.second;
+      auto csize = clusters[currid].size();
+      auto fsize = csize;
+      // std::cout << "Processing oversized cluster " << currid 
+      //           << " (size " << csize << ")" << std::endl;
+
+      auto [pairElts, dist_cmps] =
+         beam_search(Points[currid], G, leader_points, leaders[0], QP);
+      auto beamElts = pairElts.first;
+
+      for (auto j = 0; j < k; j++) {
+        if (clusters[currid].size() <= MAX_CLUSTER_SIZE) break;
+        auto candidate = beamElts[j].first;
+        int bsz = clusters[candidate].size();
+
+        if (bsz >= MAX_CLUSTER_SIZE) continue;
+
+        int surplus = clusters[currid].size() - MAX_CLUSTER_SIZE;
+        int capacity = MAX_CLUSTER_SIZE - bsz;
+        int maxadd = std::min(surplus, capacity);
+        if (maxadd <= 0) continue;
+
+        // Transfer maxadd points from the oversized cluster (currid) to the candidate cluster.
+        clusters[candidate].append(clusters[currid].begin(),
+                                   clusters[currid].begin() + maxadd);
+        clusters[currid].erase(clusters[currid].begin(),
+                               clusters[currid].begin() + maxadd);
+        // std::cout << "Transferred " << maxadd 
+        //           << " points from cluster " << currid 
+        //           << " to candidate " << candidate << std::endl;
+      }
+
+      // If after processing the candidate list the cluster is still too big,
+      // push it back into Qbig for further splitting.
+      if (clusters[currid].size() > MAX_CLUSTER_SIZE && (clusters[currid].size() != fsize)) {
+        Qbig.push(std::make_pair(clusters[currid].size(), currid));
+      }
+    }
+
+
+    std::priority_queue<std::pair<int,int>, std::vector<std::pair<int,int>>, std::greater<std::pair<int,int>> > Q;
+    for (auto i = 0; i < clusters.size(); i++) {
+      int sz = clusters[i].size();
+      if (sz != 0) Q.push(std::make_pair(sz,i));
+    }
+
+    while (Q.size() != 0) {
+      // std::cout << "Q is of size: " << Q.size() << std::endl;
+      auto curr = Q.top();
+      Q.pop();
+      if (curr.first >= MIN_CLUSTER_SIZE) break; 
+      auto [pairElts, dist_cmps] =
+      beam_search(Points[curr.second], G, leader_points, leaders[0], QP);
+    auto beamElts = pairElts.first;
+    auto currid = curr.second;
+    auto csize = clusters[currid].size();
+    auto fsize = csize;
+    // std::cout << "beam search completed on currid: " << currid << std::endl;
+    // std::cout << "beam search yielded NN: " << beamElts.size() << " with closest being: " << beamElts[0].first << std::endl;
+    for (auto j = 0; j < k; j++) {
+      csize = clusters[currid].size();
+      if (csize == 0) break;
+      auto elt = beamElts[j].first;
+      auto bsz = clusters[elt].size();
+      auto sval = csize + bsz;
+      if (sval < MAX_CLUSTER_SIZE) {
+        int maxadd = std::min(csize, MAX_CLUSTER_SIZE - bsz);  // how many points candidate can accept
+        if (maxadd <= 0) continue; // nothing to merge
+        // MERGE maxadd from curr INTO Bucket[j]
+        clusters[elt].append(clusters[currid].begin(),
+                            clusters[currid].begin() + maxadd);
+        // Remove the transferred points from the candidate cluster.
+        clusters[currid].erase(clusters[currid].begin(),
+                                clusters[currid].begin() + maxadd);
+
+      } else {
+        if (sval > MAX_CLUSTER_SIZE) {
+          int maxadd = std::min(bsz, MAX_CLUSTER_SIZE - csize); // candidate can give at most this many points
+          if (maxadd <= 0) continue;
+          // MERGE maxadd from Bucket[j] into curr
+                  // MERGE maxadd from curr INTO Bucket[j]
+          clusters[currid].append(clusters[elt].begin(),
+                                clusters[elt].begin() + maxadd);
+          // Remove the transferred points from the candidate cluster.
+          clusters[elt].erase(clusters[elt].begin(),
+                                  clusters[elt].begin() + maxadd);
+
+        }
+      }
+      // update Bucket[j] in queue (TODO IF NEEDED)
+    }
+    auto cst = clusters[currid].size();
+    if ((cst < MIN_CLUSTER_SIZE) && (cst != 0) && (cst != fsize)) Q.push(std::make_pair(clusters[currid].size(),currid));
+
+    }
+
+    std::cout << "merging complete..." << std::endl;
+    for (auto i = 0; i < 20; i++) {
+      std::cout << clusters[i].size() << " ";
+    }
+    std::cout << std::endl;
+
+    return clusters;
+  }
+
+    auto PruneSLINK_wrapper(GraphI &G, PR &Points, size_t cluster_size) {
+    std::random_device rd;
+    std::mt19937 rng(rd());
+    std::uniform_int_distribution<int> uni(0, Points.size());
+    parlay::random rnd(uni(rng));
+    auto ids = parlay::tabulate(Points.size(), [&](uint32_t i) { return i; });
+    parlay::internal::timer t;
+    t.start();
+    SEED = parlay::hash64(SEED);
+    auto buckets = PruneSLINK(Points, ids, SEED);
+    t.next("buckets time");
+    std::cout << "Computed buckets!" << std::endl;
+    // Build on each bucket.
+    parlay::parallel_for(0, buckets.size(),
+                         [&](size_t i) {
+                           if (buckets[i].size() != 0) RunLeaf(G, Points, buckets[i]);
+                         });
+    t.next("build leaf time");
+  }
+
   // Returns a collection of leaf buckets.
   std::vector<Bucket> RecursivelySketch(PR &Points, Bucket &ids,
                                         long cluster_size, int depth,
@@ -159,7 +349,9 @@ struct cluster {
     //}
     num_leaders = std::min<size_t>(num_leaders, MAX_NUM_LEADERS);
     num_leaders = std::max<size_t>(num_leaders, 3);
-
+    lock.lock();
+    COMPARISONS += num_leaders*ids.size();
+    lock.unlock();
     Bucket leaders(num_leaders);
     std::mt19937 prng(seed);
     size_t next_seed = parlay::hash64(seed);
@@ -293,10 +485,12 @@ struct cluster {
       if (MULTI_PIVOT) {
         recursively_sketch_wrapper(G, Points, cluster_size);
       } else {
-        random_clustering_wrapper(G, Points, cluster_size);
+        //random_clustering_wrapper(G, Points, cluster_size);
+        PruneSLINK_wrapper(G,Points,cluster_size);
       }
       std::cout << "Built cluster " << i << " of " << num_clusters << std::endl;
       std::cout << "Leaf count: " << leaf_count << std::endl;
+      std::cout << "# of comparisons: " << COMPARISONS << std::endl;
     }
   }
 
@@ -467,6 +661,7 @@ struct cluster {
   // Horrible hacks. Fix.
   SpinLock lock;
   parlay::sequence<uint32_t> START_POINTS;
+  size_t COMPARISONS = 0;
 };
 
 }  // namespace parlayANN

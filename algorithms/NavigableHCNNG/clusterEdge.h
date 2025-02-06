@@ -167,11 +167,11 @@ struct cluster {
     // DistMatQuadPrune(G, leader_points,leader_ids);
     // this uses vamana to build index
     stats<indexType> sbuild(size_t (leaders.size()));
-    BuildParams BPb(20,32,1.2,2,false);
+    BuildParams BPb(20,32,ALPHA,2,false);
     using findex = knn_index<PointRange, PointRange, indexType>;
     findex I(BPb);
     I.build_index(G,leader_points,leader_points,sbuild);
-    QueryParams QP((long) 10, 20, (double) 1.1, (long) leaders.size(), (long) 20);
+    QueryParams QP((long) 10, 20, (double) ALPHA, (long) leaders.size(), (long) 20);
     stats<indexType> s((size_t) Points.size());
     //std::cout << "built graph on leaders..." << std::endl;
     // get nearest neighbors for each point
@@ -244,7 +244,9 @@ struct cluster {
         frontier.pop();
         auto csize = clusters[cand].size();
         if ((csize == 0) || (csize + clusters[currid].size() > MAX_CLUSTER_SIZE)) {
-          for (auto nbr : G[cand]) frontier.push(nbr);
+          for (auto nbr : G[cand]){
+               if (nbr < clusters.size() && clusters[nbr].size() != 0) frontier.push(nbr);
+          }
         } else {
           clusters[cand].append(clusters[currid].begin(),
                             clusters[currid].end());

@@ -11,6 +11,7 @@
 #include "parlay/parallel.h"
 #include "parlay/primitives.h"
 #include "parlay/io.h"
+#include "parlay/internal/get_time.h"
 #include "utils/euclidian_point.h"
 #include "utils/mips_point.h"
 #include "utils/point_range.h"
@@ -22,6 +23,9 @@ using namespace parlayANN;
 template<typename PointRange>
 parlay::sequence<parlay::sequence<pid>> compute_groundtruth(PointRange &B, 
   PointRange &Q, int k){
+    parlay::internal::timer t;
+    t.start();
+
     unsigned d = B.dimension();
     size_t q = Q.size();
     size_t b = B.size();
@@ -55,7 +59,7 @@ parlay::sequence<parlay::sequence<pid>> compute_groundtruth(PointRange &B,
         }
         return topk;
     });
-    std::cout << "Done computing groundtruth" << std::endl;
+    std::cout << "Done computing groundtruth in " << t.next_time() << " seconds" << std::endl;
     return answers;
 }
 

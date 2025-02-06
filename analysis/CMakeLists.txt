@@ -3,6 +3,7 @@ set(TEST_FILES
 	centrality.cpp
     graph_analysis.cpp
     graph_sparsify.cpp
+	deleting_central_edges.cpp
 )
 
 foreach(TEST_FILE ${TEST_FILES})

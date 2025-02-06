@@ -8,3 +8,8 @@ output/
 
 *.bin
 *.graph
+*.gt
+*.txt
+*.csv
+*.fbin
+*.ibin

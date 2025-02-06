@@ -175,7 +175,7 @@ struct cluster {
     stats<indexType> s((size_t) Points.size());
     //std::cout << "built graph on leaders..." << std::endl;
     // get nearest neighbors for each point
-    auto bss = beamSearchRandom(Points, G, leader_points, s, QP);
+    auto bss = beamSearchZero(Points, G, leader_points, s, QP);
 
     // now we'll try to create an approximate stable matching for bucketing
     // for now we will use a greedy strategy:

@@ -350,6 +350,51 @@ beamSearchRandom(const PointRange& Query_Points,
   return all_neighbors;
 }
 
+// searches every element in q starting from 0 (HACK FOR PRUNESLINK, SHOULD BE ELIMINATED)
+template<typename PointRange, typename indexType>
+parlay::sequence<parlay::sequence<indexType>>
+beamSearchZero(const PointRange& Query_Points,
+                 const Graph<indexType> &G,
+                 const PointRange &Base_Points,
+                 stats<indexType> &QueryStats,
+                 const QueryParams &QP) {
+  using Point = typename PointRange::Point;
+  if (QP.k > QP.beamSize) {
+    std::cout << "Error: beam search parameter Q = " << QP.beamSize
+              << " same size or smaller than k = " << QP.k << std::endl;
+    abort();
+  }
+  // use a random shuffle to generate random starting points for each query
+  size_t n = G.size();
+
+  parlay::sequence<parlay::sequence<indexType>> all_neighbors(Query_Points.size());
+
+  parlay::random_generator gen;
+  std::uniform_int_distribution<long> dis(0, n - 1);
+  auto indices = parlay::tabulate(Query_Points.size(), [&](size_t i) {
+    return 0;
+  });
+
+  parlay::parallel_for(0, Query_Points.size(), [&](size_t i) {
+    parlay::sequence<indexType> neighbors = parlay::sequence<indexType>(QP.k);
+    indexType start = indices[i];
+    parlay::sequence<std::pair<indexType, typename Point::distanceType>> beamElts;
+    parlay::sequence<std::pair<indexType, typename Point::distanceType>> visitedElts;
+    auto [pairElts, dist_cmps] =
+      beam_search(Query_Points[i], G, Base_Points, start, QP);
+    beamElts = pairElts.first;
+    visitedElts = pairElts.second;
+    for (indexType j = 0; j < QP.k; j++) {
+      neighbors[j] = beamElts[j].first;
+    }
+    all_neighbors[i] = neighbors;
+    QueryStats.increment_visited(i, visitedElts.size());
+    QueryStats.increment_dist(i, dist_cmps);
+  });
+  return all_neighbors;
+}
+
+
 template<typename PointRange, typename indexType>
 parlay::sequence<parlay::sequence<indexType>>
 searchAll(PointRange& Query_Points,

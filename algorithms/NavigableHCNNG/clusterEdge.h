@@ -160,22 +160,22 @@ struct cluster {
     std::vector<Bucket> clusters(leaders.size());
     auto leader_points = PointRange(Points, leaders);
     // create graph on leaders to be ANN index...
-    GraphI G(64,leaders.size());
+    GraphI G(32,leaders.size());
     auto leader_ids = parlay::tabulate(num_leaders, [&](uint32_t i) { return i; });
     
     // this uses QuadPrune to build the index
-    DistMatQuadPrune(G, leader_points,leader_ids);
+    // DistMatQuadPrune(G, leader_points,leader_ids);
     // this uses vamana to build index
-    // stats<indexType> sbuild(size_t (leaders.size()));
-    // BuildParams BPb(40,64,1.1,2,false);
-    // using findex = knn_index<PointRange, PointRange, indexType>;
-    // findex I(BPb);
-    // I.build_index(G,leader_points,leader_points,sbuild);
-    QueryParams QP((long) 10, 100, (double) 1.35, (long) leaders.size(), (long) 100);
+    stats<indexType> sbuild(size_t (leaders.size()));
+    BuildParams BPb(20,32,ALPHA,2,false);
+    using findex = knn_index<PointRange, PointRange, indexType>;
+    findex I(BPb);
+    I.build_index(G,leader_points,leader_points,sbuild);
+    QueryParams QP((long) 10, 20, (double) ALPHA, (long) leaders.size(), (long) 20);
     stats<indexType> s((size_t) Points.size());
     //std::cout << "built graph on leaders..." << std::endl;
     // get nearest neighbors for each point
-    auto bss = beamSearchRandom(Points, G, leader_points, s, QP);
+    auto bss = beamSearchZero(Points, G, leader_points, s, QP);
 
     // now we'll try to create an approximate stable matching for bucketing
     // for now we will use a greedy strategy:
@@ -244,7 +244,9 @@ struct cluster {
         frontier.pop();
         auto csize = clusters[cand].size();
         if ((csize == 0) || (csize + clusters[currid].size() > MAX_CLUSTER_SIZE)) {
-          for (auto nbr : G[cand]) frontier.push(nbr);
+          for (auto nbr : G[cand]){
+               if (nbr < clusters.size() && clusters[nbr].size() != 0) frontier.push(nbr);
+          }
         } else {
           clusters[cand].append(clusters[currid].begin(),
                             clusters[currid].end());

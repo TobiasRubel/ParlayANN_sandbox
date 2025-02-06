@@ -4,6 +4,7 @@ set(TEST_FILES
     graph_analysis.cpp
     graph_sparsify.cpp
 	deleting_central_edges.cpp
+	prune_neighborhood.cpp
 )
 
 foreach(TEST_FILE ${TEST_FILES})

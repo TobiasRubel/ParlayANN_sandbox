@@ -148,11 +148,11 @@ struct cluster {
 		t.next("tree time");
   }
 
-  std::vector<Bucket> PruneSLINK(PR &Points, Bucket &ids, size_t seed) {
+  std::vector<Bucket> PruneSLINK(PR &Points, Bucket &ids, size_t num_leaders, size_t seed) {
     // sample leaders
     std::cout << "Leader sampling seed = " << seed << std::endl;
 
-    size_t num_leaders = TOP_LEVEL_NUM_LEADERS;
+    // size_t num_leaders = TOP_LEVEL_NUM_LEADERS;
     Bucket leaders(num_leaders);
     std::mt19937 prng(seed);
     //size_t next_seed = parlay::hash64(seed);
@@ -267,7 +267,7 @@ struct cluster {
     return clusters;
   }
 
-    auto PruneSLINK_wrapper(GraphI &G, PR &Points, size_t cluster_size) {
+  auto PruneSLINK_wrapper(GraphI &G, PR &Points, size_t num_clusters, size_t cluster_size) {
     std::random_device rd;
     std::mt19937 rng(rd());
     std::uniform_int_distribution<int> uni(0, Points.size());
@@ -276,7 +276,7 @@ struct cluster {
     parlay::internal::timer t;
     t.start();
     SEED = parlay::hash64(SEED);
-    auto buckets = PruneSLINK(Points, ids, SEED);
+    auto buckets = PruneSLINK(Points, ids, num_clusters, SEED);
     t.next("buckets time");
     std::cout << "Computed buckets!" << std::endl;
     // Build on each bucket.
@@ -440,7 +440,14 @@ struct cluster {
         recursively_sketch_wrapper(G, Points, cluster_size);
       } else {
         //random_clustering_wrapper(G, Points, cluster_size);
-        PruneSLINK_wrapper(G,Points,cluster_size);
+        double t = (double)i / (num_clusters - 1);
+        size_t num_leaders = num_clusters > 1
+          ? TOP_LEVEL_NUM_LEADERS / 5 + t * (TOP_LEVEL_NUM_LEADERS - TOP_LEVEL_NUM_LEADERS / 5)
+          : TOP_LEVEL_NUM_LEADERS;
+        std::cout << "TOP_LEVEL_NUM_LEADERS: " << TOP_LEVEL_NUM_LEADERS << std::endl;
+        std::cout << "t: " << t << std::endl;
+        std::cout << "Building cluster with " << num_leaders << " leaders" << std::endl;
+        PruneSLINK_wrapper(G,Points,num_leaders,cluster_size);
       }
       std::cout << "Built cluster " << i << " of " << num_clusters << std::endl;
       std::cout << "Leaf count: " << leaf_count << std::endl;

@@ -327,8 +327,9 @@ beamSearchRandom(const PointRange& Query_Points,
   parlay::random_generator gen;
   std::uniform_int_distribution<long> dis(0, n - 1);
   auto indices = parlay::tabulate(Query_Points.size(), [&](size_t i) {
-    auto r = gen[i];
-    return dis(r);
+    return 0;
+    //auto r = gen[i];
+    //return dis(r);
   });
 
   parlay::parallel_for(0, Query_Points.size(), [&](size_t i) {

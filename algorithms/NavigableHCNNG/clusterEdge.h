@@ -160,18 +160,18 @@ struct cluster {
     std::vector<Bucket> clusters(leaders.size());
     auto leader_points = PointRange(Points, leaders);
     // create graph on leaders to be ANN index...
-    GraphI G(64,leaders.size());
+    GraphI G(32,leaders.size());
     auto leader_ids = parlay::tabulate(num_leaders, [&](uint32_t i) { return i; });
     
     // this uses QuadPrune to build the index
-    DistMatQuadPrune(G, leader_points,leader_ids);
+    // DistMatQuadPrune(G, leader_points,leader_ids);
     // this uses vamana to build index
-    // stats<indexType> sbuild(size_t (leaders.size()));
-    // BuildParams BPb(40,64,1.1,2,false);
-    // using findex = knn_index<PointRange, PointRange, indexType>;
-    // findex I(BPb);
-    // I.build_index(G,leader_points,leader_points,sbuild);
-    QueryParams QP((long) 10, 100, (double) 1.35, (long) leaders.size(), (long) 100);
+    stats<indexType> sbuild(size_t (leaders.size()));
+    BuildParams BPb(20,32,1.2,2,false);
+    using findex = knn_index<PointRange, PointRange, indexType>;
+    findex I(BPb);
+    I.build_index(G,leader_points,leader_points,sbuild);
+    QueryParams QP((long) 10, 20, (double) 1.1, (long) leaders.size(), (long) 20);
     stats<indexType> s((size_t) Points.size());
     //std::cout << "built graph on leaders..." << std::endl;
     // get nearest neighbors for each point

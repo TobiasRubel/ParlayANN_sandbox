@@ -456,9 +456,10 @@ for (size_t cid = 0; cid < clusters.size(); cid++) {
       } else {
         //random_clustering_wrapper(G, Points, cluster_size);
         double t = (double)i / (num_clusters - 1);
-        size_t num_leaders = num_clusters > 1
-          ? TOP_LEVEL_NUM_LEADERS / 5 + t * (TOP_LEVEL_NUM_LEADERS - TOP_LEVEL_NUM_LEADERS / 5)
-          : TOP_LEVEL_NUM_LEADERS;
+        // size_t num_leaders = num_clusters > 1
+        //   ? TOP_LEVEL_NUM_LEADERS / 5 + t * (TOP_LEVEL_NUM_LEADERS - TOP_LEVEL_NUM_LEADERS / 5)
+        //   : TOP_LEVEL_NUM_LEADERS;
+        size_t num_leaders = TOP_LEVEL_NUM_LEADERS;
         std::cout << "TOP_LEVEL_NUM_LEADERS: " << TOP_LEVEL_NUM_LEADERS << std::endl;
         std::cout << "t: " << t << std::endl;
         std::cout << "Building cluster with " << num_leaders << " leaders" << std::endl;

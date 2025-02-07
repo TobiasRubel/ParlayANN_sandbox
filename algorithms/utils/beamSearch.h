@@ -352,47 +352,59 @@ beamSearchRandom(const PointRange& Query_Points,
 
 // searches every element in q starting from 0 (HACK FOR PRUNESLINK, SHOULD BE ELIMINATED)
 template<typename PointRange, typename indexType>
-parlay::sequence<parlay::sequence<indexType>>
+parlay::sequence<std::pair<std::pair<indexType,indexType>,
+                           typename PointRange::Point::distanceType>>
 beamSearchZero(const PointRange& Query_Points,
-                 const Graph<indexType> &G,
-                 const PointRange &Base_Points,
-                 stats<indexType> &QueryStats,
-                 const QueryParams &QP) {
+               const Graph<indexType>& G,
+               const PointRange& Base_Points,
+               stats<indexType>& QueryStats,
+               const QueryParams &QP) {
   using Point = typename PointRange::Point;
+  using distanceType = typename Point::distanceType;
+  
+  // Check that we have enough beam search candidates.
   if (QP.k > QP.beamSize) {
     std::cout << "Error: beam search parameter Q = " << QP.beamSize
               << " same size or smaller than k = " << QP.k << std::endl;
     abort();
   }
-  // use a random shuffle to generate random starting points for each query
+  
+  size_t numQueries = Query_Points.size();
+  // Allocate space: each query gives QP.k edges.
+  parlay::sequence<std::pair<std::pair<indexType,indexType>, distanceType>> all_edges(numQueries * QP.k);
+  
   size_t n = G.size();
-
-  parlay::sequence<parlay::sequence<indexType>> all_neighbors(Query_Points.size());
-
   parlay::random_generator gen;
   std::uniform_int_distribution<long> dis(0, n - 1);
-  auto indices = parlay::tabulate(Query_Points.size(), [&](size_t i) {
-    return 0;
-  });
-
-  parlay::parallel_for(0, Query_Points.size(), [&](size_t i) {
-    parlay::sequence<indexType> neighbors = parlay::sequence<indexType>(QP.k);
+  // In the original code, a tabulated sequence of starting indices is created.
+  auto indices = parlay::tabulate(numQueries, [&](size_t i) { return 0; });
+  
+  parlay::parallel_for(0, numQueries, [&](size_t i) {
     indexType start = indices[i];
-    parlay::sequence<std::pair<indexType, typename Point::distanceType>> beamElts;
-    parlay::sequence<std::pair<indexType, typename Point::distanceType>> visitedElts;
-    auto [pairElts, dist_cmps] =
-      beam_search(Query_Points[i], G, Base_Points, start, QP);
-    beamElts = pairElts.first;
-    visitedElts = pairElts.second;
+    
+    // Run beam_search for the current query.
+    // beam_search returns a pair: the first element is a pair of sequences
+    // (beamElts, visitedElts) and the second is the number of distance comparisons.
+    auto [pairElts, dist_cmps] = beam_search(Query_Points[i], G, Base_Points, start, QP);
+    const auto &beamElts = pairElts.first;
+    const auto &visitedElts = pairElts.second;
+    
+    // For each of the first QP.k beam elements, record an edge.
+    // Here, the edge goes from query point i to beamElts[j].first with distance beamElts[j].second.
+    size_t offset = i * QP.k;
     for (indexType j = 0; j < QP.k; j++) {
-      neighbors[j] = beamElts[j].first;
+      all_edges[offset + j] =
+          std::make_pair(std::make_pair(i, beamElts[j].first), beamElts[j].second);
     }
-    all_neighbors[i] = neighbors;
+    
+    // Update statistics.
     QueryStats.increment_visited(i, visitedElts.size());
     QueryStats.increment_dist(i, dist_cmps);
   });
-  return all_neighbors;
+  
+  return all_edges;
 }
+
 
 
 template<typename PointRange, typename indexType>

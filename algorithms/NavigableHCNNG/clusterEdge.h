@@ -157,7 +157,7 @@ struct cluster {
     std::mt19937 prng(seed);
     //size_t next_seed = parlay::hash64(seed);
     std::sample(ids.begin(), ids.end(), leaders.begin(), leaders.size(), prng);
-    std::vector<Bucket> clusters(leaders.size());
+    std::vector<Bucket> clusters(leaders.size()*FANOUT);
     auto leader_points = PointRange(Points, leaders);
     // create graph on leaders to be ANN index...
     GraphI G(32,leaders.size());
@@ -171,99 +171,114 @@ struct cluster {
     using findex = knn_index<PointRange, PointRange, indexType>;
     findex I(BPb);
     I.build_index(G,leader_points,leader_points,sbuild);
-    QueryParams QP((long) 10, 20, (double) ALPHA, (long) leaders.size(), (long) 20);
+    QueryParams QP((long) 3*(FANOUT+1), 3*(FANOUT+2), (double) ALPHA, (long) leaders.size(), 3*(FANOUT+2)); //how to set this with fanout?
     stats<indexType> s((size_t) Points.size());
     //std::cout << "built graph on leaders..." << std::endl;
     // get nearest neighbors for each point
     auto bss = beamSearchZero(Points, G, leader_points, s, QP);
 
-    // now we'll try to create an approximate stable matching for bucketing
+    // now we'll try to assign points to buckets
     // for now we will use a greedy strategy:
-        
-    std::vector<bool> matched(Points.size(), false);
-    int unmatched = 0;
-    for (int pref = 0; pref < 10; pref++) {
-      unmatched = 0;            
-      for (size_t i = 0; i < Points.size(); i++) {
-        if (!matched[i]) {
-          ++unmatched;
-          if (pref < bss[i].size()) {
-            int bucket = bss[i][pref];
-            // If the candidate bucket is not full, assign point i there.
-            if (clusters[bucket].size() < MAX_CLUSTER_SIZE) {
-              clusters[bucket].push_back(i);  // assign point i to this bucket
-              matched[i] = true;
-            }
-          }
-        }
-      }
-      std::cout << "Preference round " << pref << ": " << unmatched << " points unmatched." << std::endl;
-      if (unmatched == 0) break;  // all points have been assigned
-    }
+
+    parlay::sort_inplace(bss, [](auto const &a, auto const &b) {
+      return a.second < b.second;
+    });
     
+    std::vector<int> matched(Points.size(), 0);
+
+    for (size_t i = 0; i < bss.size(); i++) {
+      // Each edge is stored as: ((source, target), distance)
+      auto [edge, dist] = bss[i];
+      auto [source, target] = edge;
+
+      // Check if this source is not matched and that the target's cluster is not full.
+      if ((matched[source] < FANOUT) && clusters[target].size() < MAX_CLUSTER_SIZE) {
+        auto offset = matched[source];
+        clusters[(offset*num_leaders)+target].push_back(source);  
+        ++matched[source];              
+      }
+    }
+    auto unmatched = parlay::filter(ids,[&](auto i){
+      return matched[i] < FANOUT;
+    });
     // If any points remain unmatched after 10 rounds, randomly assign them.
-    if (unmatched > 0) {
-      std::cout << "After preference rounds, " << unmatched << " points remain unmatched. Randomly assigning them." << std::endl;
+
+    if (unmatched.size() != 0) {
+      std::cout << "After matching, " << unmatched.size() << " points remain unmatched. Randomly assigning them." << std::endl;
       std::mt19937 rng(seed + 12345);  // use a different seed for random assignment
-      std::uniform_int_distribution<int> bucketDist(0, clusters.size() - 1);
-      for (size_t i = 0; i < Points.size(); i++) {
-        if (!matched[i]) {
+      std::uniform_int_distribution<int> bucketDist(0, num_leaders);
+      for (auto i : unmatched) {
+          auto offset = matched[i];
           int bucket = bucketDist(rng);
-          clusters[bucket].push_back(i);
-          matched[i] = true;
-        }
+          clusters[(offset*num_leaders)+bucket].push_back(i);
+          ++matched[i];
       }
     }
     std::cout << "matching complete..." << std::endl;
 
-    std::cout << "merging small clusters..." << std::endl;
-    auto k = 10;
-    std::priority_queue<std::pair<int,int>, std::vector<std::pair<int,int>>, std::greater<std::pair<int,int>> > Q;
-    for (auto i = 0; i < clusters.size(); i++) {
-      int sz = clusters[i].size();
-      if (sz != 0) Q.push(std::make_pair(sz,i));
-    }
+std::cout << "merging small clusters..." << std::endl;
+for (size_t cid = 0; cid < clusters.size(); cid++) {
+  // Get the leader associated with this bucket.
+  size_t leader = cid % num_leaders;
+  
+  // Check the bucket we want to merge, not the leader’s primary bucket.
+  if (clusters[cid].size() > MIN_CLUSTER_SIZE)
+    continue;
+  //std::cout << "merging " << cid << " with leader id " << leader << " and size " << clusters[cid].size() << std::endl; 
+  std::vector<bool> seen(num_leaders, false);
+  //seen[leader] = true;
+  std::priority_queue<
+    std::pair<distanceType, int>,
+    std::vector<std::pair<distanceType, int>>,
+    std::greater<>
+  > frontier;
+  
 
-    while (!Q.empty()) {
-      auto curr = Q.top();
-      Q.pop();
-      // Lazy update: skip outdated entries.
-      if (curr.first != clusters[curr.second].size()) {
-        continue;
-      }
-      // If the bucket already meets the minimum size, stop processing.
-      if (curr.first >= MIN_CLUSTER_SIZE) break; 
-      auto currid = curr.second;
-
-      // Perform greedy search to find nearest merge-able cluster
-
-      std::queue<int> frontier;
-      for (auto nbr : G[currid]) frontier.push(nbr);
-      while (!frontier.empty()){ 
-        auto cand = frontier.front();
-        frontier.pop();
-        auto csize = clusters[cand].size();
-        if ((csize == 0) || (csize + clusters[currid].size() > MAX_CLUSTER_SIZE)) {
-          for (auto nbr : G[cand]){
-               if (nbr < clusters.size() && clusters[nbr].size() != 0) frontier.push(nbr);
+  //Push the leader
+  frontier.push({(distanceType)0,leader});
+  
+  while (!frontier.empty()) {
+    auto [dist, cand] = frontier.top();
+    //std:: cout << "considering " << cand << std::endl;
+    frontier.pop();
+    if (seen[cand])
+      continue;
+    seen[cand] = true;
+    
+    // search all fanout buckets for mergable cluster
+    for (size_t fan = 0; fan < FANOUT; fan++){
+      size_t candclustid = (fan * num_leaders) + cand;
+      size_t csize = clusters[candclustid].size();
+      if ((candclustid != cid) && (csize != 0) && (csize + clusters[cid].size() <= MAX_CLUSTER_SIZE)) {
+        // Merge without duplicates (todo: more efficiently)
+        for (auto elem : clusters[cid]) {
+          if (std::find(clusters[candclustid].begin(), clusters[candclustid].end(), elem) ==
+              clusters[candclustid].end()) {
+            clusters[candclustid].push_back(elem);
           }
-        } else {
-          clusters[cand].append(clusters[currid].begin(),
-                            clusters[currid].end());
-          // Remove the transferred points from the candidate cluster.
-          clusters[currid].erase(clusters[currid].begin(),
-                                clusters[currid].end());
-          Q.push(std::make_pair(clusters[cand].size(),cand));
-          break;
         }
+        clusters[cid].clear();
+        while (!frontier.empty()) frontier.pop();
+        break;
       }
-
     }
-
-
-    for (auto i = 0; i < 20; i++) {
-      std::cout << clusters[i].size() << " ";
+    
+    // Push the neighbors of cand into the frontier.
+    for (auto nbrid = 0; nbrid < G[cand].size(); nbrid++) {
+      auto nbr = G[cand][nbrid];
+      if (!seen[nbr]) {
+        distanceType ndist = leader_points[leader].distance(leader_points[nbr]);
+        frontier.push({ndist, nbr});
+      }
     }
+  }
+}
+
+
+
+    // for (auto i = 0; i < 20; i++) {
+    //   std::cout << clusters[i].size() << " ";
+    // }
     return clusters;
   }
 
@@ -628,141 +643,3 @@ struct cluster {
 }  // namespace parlayANN
 
 
-    // parlay::sequence<std::pair<indexType,indexType>> flat = parlay::tabulate(Points.size(), [&](uint32_t i) { 
-    //   return std::make_pair(bss[i][0],i);
-    //   }); 
-
-    // std::cout << "points assigned to their initial buckets..." << std::endl;
-    // std::cout << "random sampling for debugging:..." << std::endl;
-    // for (auto i = 0; i < 10; i++) {
-    //   std::cout << flat[i].first << " " << flat[i].second << std::endl;
-    // }
-    // auto pclusters = parlay::group_by_index(flat, leaders.size());
-    // //std::cout << "clusters grouped by index..." << std::endl;
-
-    // // copy clusters from parlay::sequence to std::vector
-    // parlay::parallel_for(0, pclusters.size(), [&](size_t i) {
-    //   clusters[i] = Bucket(pclusters[i].begin(), pclusters[i].end());
-    // });
-    // std::cout << "initial clustering completed. merging..." << std::endl;
-
-    // // merging step balances clusters by identifying those which are too big or too small and merging them into the
-    // // nearest cluster which is available in a greedy fashion
-    // auto k = 100;
-
-    // // first merge big clusters down 
-    // std::priority_queue<std::pair<int,int>> Qbig;
-    // for (auto i = 0; i < clusters.size(); i++) {
-    //   int sz = clusters[i].size();
-    //   if (sz > MAX_CLUSTER_SIZE) {
-    //     Qbig.push(std::make_pair(sz, i));
-    //   }
-    // }
-
-    // while (!Qbig.empty()) {
-    //   // std::cout << "Qbig is of size: " << Qbig.size() << std::endl;
-    //   auto curr = Qbig.top();
-    //   Qbig.pop();
-    //   // If this cluster is no longer oversized, skip it.
-    //   if (clusters[curr.second].size() <= MAX_CLUSTER_SIZE) continue;
-    //   auto currid = curr.second;
-    //   auto csize = clusters[currid].size();
-    //   auto fsize = csize;
-    //   // std::cout << "Processing oversized cluster " << currid 
-    //   //           << " (size " << csize << ")" << std::endl;
-
-    //   auto [pairElts, dist_cmps] =
-    //      beam_search(Points[currid], G, leader_points, leaders[0], QP);
-    //   auto beamElts = pairElts.first;
-
-    //   for (auto j = 0; j < k; j++) {
-    //     if (clusters[currid].size() <= MAX_CLUSTER_SIZE) break;
-    //     auto candidate = beamElts[j].first;
-    //     int bsz = clusters[candidate].size();
-
-    //     if (bsz >= MAX_CLUSTER_SIZE) continue;
-
-    //     int surplus = clusters[currid].size() - MAX_CLUSTER_SIZE;
-    //     int capacity = MAX_CLUSTER_SIZE - bsz;
-    //     int maxadd = std::min(surplus, capacity);
-    //     if (maxadd <= 0) continue;
-
-    //     // Transfer maxadd points from the oversized cluster (currid) to the candidate cluster.
-    //     clusters[candidate].append(clusters[currid].begin(),
-    //                                clusters[currid].begin() + maxadd);
-    //     clusters[currid].erase(clusters[currid].begin(),
-    //                            clusters[currid].begin() + maxadd);
-    //     // std::cout << "Transferred " << maxadd 
-    //     //           << " points from cluster " << currid 
-    //     //           << " to candidate " << candidate << std::endl;
-    //   }
-
-    //   // If after processing the candidate list the cluster is still too big,
-    //   // push it back into Qbig for further splitting.
-    //   if (clusters[currid].size() > MAX_CLUSTER_SIZE && (clusters[currid].size() != fsize)) {
-    //     Qbig.push(std::make_pair(clusters[currid].size(), currid));
-    //   }
-    // }
-
-
-    // std::priority_queue<std::pair<int,int>, std::vector<std::pair<int,int>>, std::greater<std::pair<int,int>> > Q;
-    // for (auto i = 0; i < clusters.size(); i++) {
-    //   int sz = clusters[i].size();
-    //   if (sz != 0) Q.push(std::make_pair(sz,i));
-    // }
-
-    // while (Q.size() != 0) {
-    //   // std::cout << "Q is of size: " << Q.size() << std::endl;
-    //   auto curr = Q.top();
-    //   Q.pop();
-    //   if (curr.first >= MIN_CLUSTER_SIZE) break; 
-    //   auto [pairElts, dist_cmps] =
-    //   beam_search(Points[curr.second], G, leader_points, leaders[0], QP);
-    // auto beamElts = pairElts.first;
-    // auto currid = curr.second;
-    // auto csize = clusters[currid].size();
-    // auto fsize = csize;
-    // // std::cout << "beam search completed on currid: " << currid << std::endl;
-    // // std::cout << "beam search yielded NN: " << beamElts.size() << " with closest being: " << beamElts[0].first << std::endl;
-    // for (auto j = 0; j < k; j++) {
-    //   csize = clusters[currid].size();
-    //   if (csize == 0) break;
-    //   auto elt = beamElts[j].first;
-    //   auto bsz = clusters[elt].size();
-    //   auto sval = csize + bsz;
-    //   if (sval < MAX_CLUSTER_SIZE) {
-    //     int maxadd = std::min(csize, MAX_CLUSTER_SIZE - bsz);  // how many points candidate can accept
-    //     if (maxadd <= 0) continue; // nothing to merge
-    //     // MERGE maxadd from curr INTO Bucket[j]
-    //     clusters[elt].append(clusters[currid].begin(),
-    //                         clusters[currid].begin() + maxadd);
-    //     // Remove the transferred points from the candidate cluster.
-    //     clusters[currid].erase(clusters[currid].begin(),
-    //                             clusters[currid].begin() + maxadd);
-
-    //   } else {
-    //     if (sval > MAX_CLUSTER_SIZE) {
-    //       int maxadd = std::min(bsz, MAX_CLUSTER_SIZE - csize); // candidate can give at most this many points
-    //       if (maxadd <= 0) continue;
-    //       // MERGE maxadd from Bucket[j] into curr
-    //               // MERGE maxadd from curr INTO Bucket[j]
-    //       clusters[currid].append(clusters[elt].begin(),
-    //                             clusters[elt].begin() + maxadd);
-    //       // Remove the transferred points from the candidate cluster.
-    //       clusters[elt].erase(clusters[elt].begin(),
-    //                               clusters[elt].begin() + maxadd);
-
-    //     }
-    //   }
-    //   // update Bucket[j] in queue (TODO IF NEEDED)
-    // }
-    // auto cst = clusters[currid].size();
-    // if ((cst < MIN_CLUSTER_SIZE) && (cst != 0) && (cst != fsize)) Q.push(std::make_pair(clusters[currid].size(),currid));
-
-    // }
-
-    // std::cout << "merging complete..." << std::endl;
-    // for (auto i = 0; i < 20; i++) {
-    //   std::cout << clusters[i].size() << " ";
-    // }
-    // std::cout << std::endl;

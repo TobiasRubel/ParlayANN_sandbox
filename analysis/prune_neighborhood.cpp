@@ -1,11 +1,14 @@
 #include <iostream>
 #include <cstdint>
 #include <cstring>
+#include <random>
+#include <atomic>
 #include <getopt.h>
 
 #include <parlay/sequence.h>
 #include <parlay/parallel.h>
 #include <parlay/primitives.h>
+#include <parlay/random.h>
 
 #include "utils/types.h"
 #include "utils/graph.h"
@@ -20,16 +23,20 @@
 void print_help() {
     std::cout << "Usage: ./prune_neighborhood [options]" << std::endl;
     std::cout << "Options:" << std::endl;
-    std::cout << "  -h, --help                Show this help message" << std::endl;
-    std::cout << "  -d, --dataset <num>       Dataset number (1 or 2)" << std::endl;
-    std::cout << "  -v, --use_vamana          Use vamana to approximate neighborhoods" << std::endl;
-    std::cout << "  -e, --exactness <value>   Exactness value (default: 0.9)" << std::endl;
+    std::cout << "  -h, --help                     Show this help message" << std::endl;
+    std::cout << "  -d, --dataset <num>            Dataset number (1 or 2)" << std::endl;
+    std::cout << "  -v, --use_vamana               Use vamana to approximate neighborhoods" << std::endl;
+    std::cout << "  -r, --random_noise <value>     Percentage of candidates replaced with random noise (range [0, 1])" << std::endl;
+    std::cout << "  -n, --neighborhood_size <num>  Size of the neighborhood to prune" << std::endl;
+    std::cout << "  -b, --bfs_candidates <num>     Number of BFS levels spliced into graph" << std::endl;
 }
 
 struct arguments {
     int dataset;
     bool use_vamana;
-    double exactness;
+    double random_noise;
+    size_t neighborhood_size;
+    size_t bfs_candidates;
 };
 
 void parse_arguments(int argc, char *argv[], arguments &args) {
@@ -37,16 +44,20 @@ void parse_arguments(int argc, char *argv[], arguments &args) {
         {"help", no_argument, NULL, 'h'},
         {"dataset", required_argument, NULL, 'd'},
         {"use_vamana", no_argument, NULL, 'v'},
-        {"exactness", required_argument, NULL, 'e'},
+        {"random_noise", required_argument, NULL, 'r'},
+        {"neighborhood_size", required_argument, NULL, 'n'},
+        {"bfs_candidates", required_argument, NULL, 'b'},
         {NULL, 0, NULL, 0}
     };
 
     args.dataset = 1;
     args.use_vamana = false;
-    args.exactness = 0.9;
+    args.random_noise = 0;
+    args.neighborhood_size = 500;
+    args.bfs_candidates = 0;
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "hd:ve:", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "hd:vr:n:b:", long_options, NULL)) != -1) {
         switch (opt) {
             case 'h':
                 print_help();
@@ -57,13 +68,24 @@ void parse_arguments(int argc, char *argv[], arguments &args) {
             case 'v':
                 args.use_vamana = true;
                 break;
-            case 'e':
-                args.exactness = std::stod(optarg);
+            case 'r':
+                args.random_noise = std::stod(optarg);
+                break;
+            case 'n':
+                args.neighborhood_size = std::stoul(optarg);
+                break;
+            case 'b':
+                args.bfs_candidates = std::stoul(optarg);
                 break;
             default:
                 print_help();
                 exit(EXIT_FAILURE);
         }
+    }
+
+    if (args.use_vamana && args.neighborhood_size > 500) {
+        std::cerr << "Neighborhood size must be <= 500 when using Vamana." << std::endl;
+        exit(EXIT_FAILURE);
     }
 }
 
@@ -104,25 +126,26 @@ int main(int argc, char *argv[]) {
 
     PointRangeType B, Q;
     parlayANN::groundTruth<index_t> GT, neighborhood;
-    parlay::sequence<parlay::sequence<index_t>> pruned_neighbors;
+    parlay::sequence<parlay::sequence<index_t>> neighbors;
     GraphType G;
     if (args.use_vamana) {
         B = PointRangeType(base_path.data());
         Q = PointRangeType(query_path.data());
         GT = parlayANN::groundTruth<index_t>(gt_path.data());
-        G = GraphType(max_degree, B.size());
+        auto VG = GraphType(max_degree, B.size());
         auto BP = parlayANN::BuildParams(max_degree, 64, 1.2, 2, false);
         auto I = parlayANN::knn_index<PointRangeType, PointRangeType, index_t>(BP);
         parlayANN::stats<index_t> sbuild(size_t(B.size()));
-        I.build_index(G, B, B, sbuild);
+        I.build_index(VG, B, B, sbuild);
 
         std::cout << "Obtaining approximate neighborhoods..." << std::endl;
-        auto QP = parlayANN::QueryParams(500, 1000, 1.35, B.size(), max_degree, 1);
-        auto neighbors = parlayANN::qsearchAll<PointRangeType, PointRangeType, PointRangeType, index_t>(B, B, B, G, B, B, B, sbuild, 0, QP);
+        auto QP = parlayANN::QueryParams(args.neighborhood_size, 1000, 1.35, B.size(), max_degree, 1);
+        auto candidates = parlayANN::qsearchAll<PointRangeType, PointRangeType, PointRangeType, index_t>(B, B, B, VG, B, B, B, sbuild, 0, QP);
 
         std::cout << "Pruning neighborhoods..." << std::endl;
-        pruned_neighbors = parlay::tabulate(B.size(), [&](size_t i) {
-            return I.robustPrune(i, neighbors[i], G, B, 1.2, false).first;
+        G = GraphType(max_degree, B.size());
+        neighbors = parlay::tabulate(B.size(), [&](size_t i) {
+            return I.robustPrune(i, candidates[i], G, B, 1.2, false).first;
         });
     }
     else {
@@ -130,32 +153,44 @@ int main(int argc, char *argv[]) {
         Q = PointRangeType(query_path.data());
         GT = parlayANN::groundTruth<index_t>(exact_path.data());
         neighborhood = parlayANN::groundTruth<index_t>(exact_path.data());
-        G = GraphType(max_degree, B.size());
         auto BP = parlayANN::BuildParams(max_degree, 64, 1.2, 2, false);
         auto I = parlayANN::knn_index<PointRangeType, PointRangeType, index_t>(BP);
-        size_t target_neighborhood_size = 500;
 
-        auto neighbors = parlay::tabulate(B.size(), [&](size_t i) {
-            return parlay::tabulate(target_neighborhood_size, [&](size_t j) {
-                return neighborhood.coordinates(i, j);
-            });
+        parlay::random_generator gen;
+        std::uniform_real_distribution<double> flt_dis(0, 1);
+        std::uniform_int_distribution<index_t> int_dis(0, B.size() - 1);
+
+        auto candidates = parlay::tabulate(B.size(), [&](size_t i) {
+            auto r = gen[i];
+            parlay::sequence<index_t> cands;
+            cands.reserve(args.neighborhood_size);
+            for (size_t j = 0; j < args.neighborhood_size; j++) {
+                if (flt_dis(r) < args.random_noise) {
+                    cands.push_back(int_dis(r));
+                }
+                else {
+                    cands.push_back(neighborhood.coordinates(i, j));
+                }
+            }
+            return cands;
         });
 
         std::cout << "Pruning neighborhoods..." << std::endl;
-        pruned_neighbors = parlay::tabulate(B.size(), [&](size_t i) {
-            return I.robustPrune(i, neighbors[i], G, B, 1.2, false).first;
+        G = GraphType(max_degree, B.size());
+        neighbors = parlay::tabulate(B.size(), [&](size_t i) {
+            return I.robustPrune(i, candidates[i], G, B, 1.2, false).first;
         });
     }
 
     auto adjlist_sizes = parlay::delayed_tabulate(B.size(), [&](size_t i) {
-        return pruned_neighbors[i].size();
+        return neighbors[i].size();
     });
     std::cout << "Max degree: " << parlay::reduce(adjlist_sizes, parlay::maxm<size_t>()) << std::endl;
     std::cout << "Avg degree: " << (double)parlay::reduce(adjlist_sizes, parlay::addm<size_t>()) / B.size() << std::endl;
     parlay::parallel_for(0, B.size(), [&](size_t i) {
         G[i].clear_neighbors();
-        for (size_t j = 0; j < pruned_neighbors[i].size() && j < max_degree; j++) {
-            G[i].append_neighbor(pruned_neighbors[i][j]);
+        for (size_t j = 0; j < neighbors[i].size() && j < max_degree; j++) {
+            G[i].append_neighbor(neighbors[i][j]);
         }
     });
 

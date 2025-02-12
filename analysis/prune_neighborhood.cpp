@@ -104,13 +104,12 @@ int main(int argc, char *argv[]) {
 
     PointRangeType B, Q;
     parlayANN::groundTruth<index_t> GT, neighborhood;
-    GraphType G;
+    parlay::sequence<parlay::sequence<index_t>> pruned_neighbors;
     #if USE_GT
         auto B = PointRangeType(base_path.data());
         auto Q = PointRangeType(query_path.data());
         auto GT = parlayANN::groundTruth<index_t>(exact_path.data());
         auto neighborhood = parlayANN::groundTruth<index_t>(exact_path.data());
-        auto G = GraphType(max_degree, B.size());
         auto BP = parlayANN::BuildParams(max_degree, 64, 1.2, 2, false);
         auto I = parlayANN::knn_index<PointRangeType, PointRangeType, index_t>(BP);
         size_t target_neighborhood_size = 500;
@@ -124,7 +123,6 @@ int main(int argc, char *argv[]) {
         auto B = PointRangeType(base_path.data());
         auto Q = PointRangeType(query_path.data());
         auto GT = parlayANN::groundTruth<index_t>(gt_path.data());
-        auto G = GraphType(max_degree, B.size());
         auto BP = parlayANN::BuildParams(max_degree, 64, 1.2, 2, false);
         auto I = parlayANN::knn_index<PointRangeType, PointRangeType, index_t>(BP);
         parlayANN::stats<index_t> sbuild(size_t(B.size()));
@@ -138,7 +136,7 @@ int main(int argc, char *argv[]) {
 
     // Prune the neighborhoods
     std::cout << "Pruning neighborhoods..." << std::endl;
-    auto new_G = GraphType(max_degree, B.size());
+    auto G = GraphType(max_degree, B.size());
     auto pruned_neighbors = parlay::tabulate(B.size(), [&](size_t i) {
         return I.robustPrune(i, neighbors[i], G, B, 1.2, false).first;
     });
@@ -148,14 +146,14 @@ int main(int argc, char *argv[]) {
     std::cout << "Max degree: " << parlay::reduce(adjlist_sizes, parlay::maxm<size_t>()) << std::endl;
     std::cout << "Avg degree: " << (double)parlay::reduce(adjlist_sizes, parlay::addm<size_t>()) / B.size() << std::endl;
     parlay::parallel_for(0, B.size(), [&](size_t i) {
-        new_G[i].clear_neighbors();
+        G[i].clear_neighbors();
         for (size_t j = 0; j < pruned_neighbors[i].size() && j < max_degree; j++) {
-            new_G[i].append_neighbor(pruned_neighbors[i][j]);
+            G[i].append_neighbor(pruned_neighbors[i][j]);
         }
     });
 
     std::cout << "Testing recall..." << std::endl;
-    auto [avg_deg, max_deg] = parlayANN::graph_stats_(new_G);
+    auto [avg_deg, max_deg] = parlayANN::graph_stats_(G);
     parlayANN::Graph_ G_("PrunedNeighborhood", "", G.size(), avg_deg, max_deg, 0);
-    search_and_parse(G_, new_G, B, Q, GT, NULL, NULL, 10, true);
+    search_and_parse(G_, G, B, Q, GT, NULL, NULL, 10, true);
 }

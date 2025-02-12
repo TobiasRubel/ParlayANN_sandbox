@@ -17,44 +17,45 @@
 #include "utils/parse_results.h"
 #include "vamana/neighbors.h"
 
-#define DATASET 1
-#define USE_GT true
-#define EXACTNESS 0.9
-
 void print_help() {
     std::cout << "Usage: ./prune_neighborhood [options]" << std::endl;
     std::cout << "Options:" << std::endl;
+    std::cout << "  -h, --help                Show this help message" << std::endl;
     std::cout << "  -d, --dataset <num>       Dataset number (1 or 2)" << std::endl;
-    std::cout << "  -g, --use_gt              Use ground truth for pruning" << std::endl;
+    std::cout << "  -v, --use_vamana          Use vamana to approximate neighborhoods" << std::endl;
     std::cout << "  -e, --exactness <value>   Exactness value (default: 0.9)" << std::endl;
 }
 
 struct arguments {
     int dataset;
-    bool use_gt;
+    bool use_vamana;
     double exactness;
 };
 
 void parse_arguments(int argc, char *argv[], arguments &args) {
     struct option long_options[] = {
+        {"help", no_argument, NULL, 'h'},
         {"dataset", required_argument, NULL, 'd'},
-        {"use_gt", no_argument, NULL, 'g'},
+        {"use_vamana", no_argument, NULL, 'v'},
         {"exactness", required_argument, NULL, 'e'},
         {NULL, 0, NULL, 0}
     };
 
     args.dataset = 1;
-    args.use_gt = true;
+    args.use_vamana = false;
     args.exactness = 0.9;
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "d:ge:", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "hd:ve:", long_options, NULL)) != -1) {
         switch (opt) {
+            case 'h':
+                print_help();
+                exit(EXIT_SUCCESS);
             case 'd':
                 args.dataset = std::stoi(optarg);
                 break;
-            case 'g':
-                args.use_gt = true;
+            case 'v':
+                args.use_vamana = true;
                 break;
             case 'e':
                 args.exactness = std::stod(optarg);
@@ -93,7 +94,6 @@ int main(int argc, char *argv[]) {
             return 1;
     }
 
-    // Build an index out of the base points
     using index_t = uint32_t;
     using value_t = float;
     using PointType = parlayANN::Euclidian_Point<value_t>;
@@ -105,11 +105,32 @@ int main(int argc, char *argv[]) {
     PointRangeType B, Q;
     parlayANN::groundTruth<index_t> GT, neighborhood;
     parlay::sequence<parlay::sequence<index_t>> pruned_neighbors;
-    #if USE_GT
-        auto B = PointRangeType(base_path.data());
-        auto Q = PointRangeType(query_path.data());
-        auto GT = parlayANN::groundTruth<index_t>(exact_path.data());
-        auto neighborhood = parlayANN::groundTruth<index_t>(exact_path.data());
+    GraphType G;
+    if (args.use_vamana) {
+        B = PointRangeType(base_path.data());
+        Q = PointRangeType(query_path.data());
+        GT = parlayANN::groundTruth<index_t>(gt_path.data());
+        G = GraphType(max_degree, B.size());
+        auto BP = parlayANN::BuildParams(max_degree, 64, 1.2, 2, false);
+        auto I = parlayANN::knn_index<PointRangeType, PointRangeType, index_t>(BP);
+        parlayANN::stats<index_t> sbuild(size_t(B.size()));
+        I.build_index(G, B, B, sbuild);
+
+        std::cout << "Obtaining approximate neighborhoods..." << std::endl;
+        auto QP = parlayANN::QueryParams(500, 1000, 1.35, B.size(), max_degree, 1);
+        auto neighbors = parlayANN::qsearchAll<PointRangeType, PointRangeType, PointRangeType, index_t>(B, B, B, G, B, B, B, sbuild, 0, QP);
+
+        std::cout << "Pruning neighborhoods..." << std::endl;
+        pruned_neighbors = parlay::tabulate(B.size(), [&](size_t i) {
+            return I.robustPrune(i, neighbors[i], G, B, 1.2, false).first;
+        });
+    }
+    else {
+        B = PointRangeType(base_path.data());
+        Q = PointRangeType(query_path.data());
+        GT = parlayANN::groundTruth<index_t>(exact_path.data());
+        neighborhood = parlayANN::groundTruth<index_t>(exact_path.data());
+        G = GraphType(max_degree, B.size());
         auto BP = parlayANN::BuildParams(max_degree, 64, 1.2, 2, false);
         auto I = parlayANN::knn_index<PointRangeType, PointRangeType, index_t>(BP);
         size_t target_neighborhood_size = 500;
@@ -119,27 +140,13 @@ int main(int argc, char *argv[]) {
                 return neighborhood.coordinates(i, j);
             });
         });
-    #else
-        auto B = PointRangeType(base_path.data());
-        auto Q = PointRangeType(query_path.data());
-        auto GT = parlayANN::groundTruth<index_t>(gt_path.data());
-        auto BP = parlayANN::BuildParams(max_degree, 64, 1.2, 2, false);
-        auto I = parlayANN::knn_index<PointRangeType, PointRangeType, index_t>(BP);
-        parlayANN::stats<index_t> sbuild(size_t(B.size()));
-        I.build_index(G, B, B, sbuild);
 
-        // Use the index to obtain the approximate neighborhood of each point
-        std::cout << "Obtaining approximate neighborhoods..." << std::endl;
-        auto QP = parlayANN::QueryParams(500, 1000, 1.35, B.size(), max_degree, 1);
-        auto neighbors = parlayANN::qsearchAll<PointRangeType, PointRangeType, PointRangeType, index_t>(B, B, B, G, B, B, B, sbuild, 0, QP);
-    #endif
+        std::cout << "Pruning neighborhoods..." << std::endl;
+        pruned_neighbors = parlay::tabulate(B.size(), [&](size_t i) {
+            return I.robustPrune(i, neighbors[i], G, B, 1.2, false).first;
+        });
+    }
 
-    // Prune the neighborhoods
-    std::cout << "Pruning neighborhoods..." << std::endl;
-    auto G = GraphType(max_degree, B.size());
-    auto pruned_neighbors = parlay::tabulate(B.size(), [&](size_t i) {
-        return I.robustPrune(i, neighbors[i], G, B, 1.2, false).first;
-    });
     auto adjlist_sizes = parlay::delayed_tabulate(B.size(), [&](size_t i) {
         return pruned_neighbors[i].size();
     });

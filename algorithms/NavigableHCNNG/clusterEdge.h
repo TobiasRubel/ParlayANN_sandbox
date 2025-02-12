@@ -31,16 +31,15 @@
 #include <set>
 #include <vector>
 
+#include "../utils/beamSearch.h"
 #include "../utils/graph.h"
+#include "../utils/types.h"
+#include "../vamana/index.h"
 #include "hcnng_utils.h"
 #include "parlay/parallel.h"
 #include "parlay/primitives.h"
 #include "parlay/random.h"
 #include "topn.h"
-#include "../utils/beamSearch.h"
-#include "../utils/types.h"
-#include "../vamana/index.h"
-
 
 namespace parlayANN {
 
@@ -123,7 +122,8 @@ struct cluster {
         auto right_rnd = rnd.fork(1);
         parlay::par_do(
             [&]() {
-              random_clustering(G, Points, closer_first, left_rnd, cluster_size);
+              random_clustering(G, Points, closer_first, left_rnd,
+                                cluster_size);
             },
             [&]() {
               random_clustering(G, Points, closer_second, right_rnd,
@@ -142,48 +142,51 @@ struct cluster {
     std::uniform_int_distribution<int> uni(0, Points.size());
     parlay::random rnd(uni(rng));
     auto ids = parlay::tabulate(Points.size(), [&](uint32_t i) { return i; });
-		parlay::internal::timer t;
-		t.start();
+    parlay::internal::timer t;
+    t.start();
     random_clustering(G, Points, ids, rnd, cluster_size);
-		t.next("tree time");
+    t.next("tree time");
   }
 
-  std::vector<Bucket> PruneSLINK(PR &Points, Bucket &ids, size_t num_leaders, size_t seed) {
+  std::vector<Bucket> PruneSLINK(PR &Points, Bucket &ids, size_t num_leaders,
+                                 size_t seed) {
     // sample leaders
     std::cout << "Leader sampling seed = " << seed << std::endl;
 
     // size_t num_leaders = TOP_LEVEL_NUM_LEADERS;
     Bucket leaders(num_leaders);
     std::mt19937 prng(seed);
-    //size_t next_seed = parlay::hash64(seed);
+    // size_t next_seed = parlay::hash64(seed);
     std::sample(ids.begin(), ids.end(), leaders.begin(), leaders.size(), prng);
-    std::vector<Bucket> clusters(leaders.size()*FANOUT);
+    std::vector<Bucket> clusters(leaders.size() * FANOUT);
     auto leader_points = PointRange(Points, leaders);
     // create graph on leaders to be ANN index...
-    GraphI G(32,leaders.size());
-    auto leader_ids = parlay::tabulate(num_leaders, [&](uint32_t i) { return i; });
-    
+    GraphI G(32, leaders.size());
+    auto leader_ids =
+        parlay::tabulate(num_leaders, [&](uint32_t i) { return i; });
+
     // this uses QuadPrune to build the index
     // DistMatQuadPrune(G, leader_points,leader_ids);
     // this uses vamana to build index
-    stats<indexType> sbuild(size_t (leaders.size()));
-    BuildParams BPb(20,32,ALPHA,2,false);
+    stats<indexType> sbuild(size_t(leaders.size()));
+    BuildParams BPb(20, 32, ALPHA, 2, false);
     using findex = knn_index<PointRange, PointRange, indexType>;
     findex I(BPb);
-    I.build_index(G,leader_points,leader_points,sbuild);
-    QueryParams QP((long) 3*(FANOUT+1), 3*(FANOUT+2), (double) ALPHA, (long) leaders.size(), 3*(FANOUT+2)); //how to set this with fanout?
-    stats<indexType> s((size_t) Points.size());
-    //std::cout << "built graph on leaders..." << std::endl;
-    // get nearest neighbors for each point
+    I.build_index(G, leader_points, leader_points, sbuild);
+    QueryParams QP((long)3 * (FANOUT + 1), 3 * (FANOUT + 2), (double)ALPHA,
+                   (long)leaders.size(),
+                   3 * (FANOUT + 2));  // how to set this with fanout?
+    stats<indexType> s((size_t)Points.size());
+    // std::cout << "built graph on leaders..." << std::endl;
+    //  get nearest neighbors for each point
     auto bss = beamSearchZero(Points, G, leader_points, s, QP);
 
     // now we'll try to assign points to buckets
     // for now we will use a greedy strategy:
 
-    parlay::sort_inplace(bss, [](auto const &a, auto const &b) {
-      return a.second < b.second;
-    });
-    
+    parlay::sort_inplace(
+        bss, [](auto const &a, auto const &b) { return a.second < b.second; });
+
     std::vector<int> matched(Points.size(), 0);
 
     for (size_t i = 0; i < bss.size(); i++) {
@@ -191,90 +194,92 @@ struct cluster {
       auto [edge, dist] = bss[i];
       auto [source, target] = edge;
 
-      // Check if this source is not matched and that the target's cluster is not full.
-      if ((matched[source] < FANOUT) && clusters[target].size() < MAX_CLUSTER_SIZE) {
+      // Check if this source is not matched and that the target's cluster is
+      // not full.
+      if ((matched[source] < FANOUT) &&
+          clusters[target].size() < MAX_CLUSTER_SIZE) {
         auto offset = matched[source];
-        clusters[(offset*num_leaders)+target].push_back(source);  
-        ++matched[source];              
+        clusters[(offset * num_leaders) + target].push_back(source);
+        ++matched[source];
       }
     }
-    auto unmatched = parlay::filter(ids,[&](auto i){
-      return matched[i] < FANOUT;
-    });
+    auto unmatched =
+        parlay::filter(ids, [&](auto i) { return matched[i] < FANOUT; });
     // If any points remain unmatched after 10 rounds, randomly assign them.
 
     if (unmatched.size() != 0) {
-      std::cout << "After matching, " << unmatched.size() << " points remain unmatched. Randomly assigning them." << std::endl;
-      std::mt19937 rng(seed + 12345);  // use a different seed for random assignment
+      std::cout << "After matching, " << unmatched.size()
+                << " points remain unmatched. Randomly assigning them."
+                << std::endl;
+      std::mt19937 rng(seed +
+                       12345);  // use a different seed for random assignment
       std::uniform_int_distribution<int> bucketDist(0, num_leaders);
       for (auto i : unmatched) {
-          auto offset = matched[i];
-          int bucket = bucketDist(rng);
-          clusters[(offset*num_leaders)+bucket].push_back(i);
-          ++matched[i];
+        auto offset = matched[i];
+        int bucket = bucketDist(rng);
+        clusters[(offset * num_leaders) + bucket].push_back(i);
+        ++matched[i];
       }
     }
     std::cout << "matching complete..." << std::endl;
 
-std::cout << "merging small clusters..." << std::endl;
-for (size_t cid = 0; cid < clusters.size(); cid++) {
-  // Get the leader associated with this bucket.
-  size_t leader = cid % num_leaders;
-  
-  // Check the bucket we want to merge, not the leader’s primary bucket.
-  if (clusters[cid].size() > MIN_CLUSTER_SIZE)
-    continue;
-  //std::cout << "merging " << cid << " with leader id " << leader << " and size " << clusters[cid].size() << std::endl; 
-  std::vector<bool> seen(num_leaders, false);
-  //seen[leader] = true;
-  std::priority_queue<
-    std::pair<distanceType, int>,
-    std::vector<std::pair<distanceType, int>>,
-    std::greater<>
-  > frontier;
-  
+    std::cout << "merging small clusters..." << std::endl;
+    for (size_t cid = 0; cid < clusters.size(); cid++) {
+      // Get the leader associated with this bucket.
+      size_t leader = cid % num_leaders;
 
-  //Push the leader
-  frontier.push({(distanceType)0,leader});
-  
-  while (!frontier.empty()) {
-    auto [dist, cand] = frontier.top();
-    //std:: cout << "considering " << cand << std::endl;
-    frontier.pop();
-    if (seen[cand])
-      continue;
-    seen[cand] = true;
-    
-    // search all fanout buckets for mergable cluster
-    for (size_t fan = 0; fan < FANOUT; fan++){
-      size_t candclustid = (fan * num_leaders) + cand;
-      size_t csize = clusters[candclustid].size();
-      if ((candclustid != cid) && (csize != 0) && (csize + clusters[cid].size() <= MAX_CLUSTER_SIZE)) {
-        // Merge without duplicates (todo: more efficiently)
-        for (auto elem : clusters[cid]) {
-          if (std::find(clusters[candclustid].begin(), clusters[candclustid].end(), elem) ==
-              clusters[candclustid].end()) {
-            clusters[candclustid].push_back(elem);
+      // Check the bucket we want to merge, not the leader’s primary bucket.
+      if (clusters[cid].size() > MIN_CLUSTER_SIZE) continue;
+      // std::cout << "merging " << cid << " with leader id " << leader << " and
+      // size " << clusters[cid].size() << std::endl;
+      std::vector<bool> seen(num_leaders, false);
+      // seen[leader] = true;
+      std::priority_queue<std::pair<distanceType, int>,
+                          std::vector<std::pair<distanceType, int>>,
+                          std::greater<>>
+          frontier;
+
+      // Push the leader
+      frontier.push({(distanceType)0, leader});
+
+      while (!frontier.empty()) {
+        auto [dist, cand] = frontier.top();
+        // std:: cout << "considering " << cand << std::endl;
+        frontier.pop();
+        if (seen[cand]) continue;
+        seen[cand] = true;
+
+        // search all fanout buckets for mergable cluster
+        for (size_t fan = 0; fan < FANOUT; fan++) {
+          size_t candclustid = (fan * num_leaders) + cand;
+          size_t csize = clusters[candclustid].size();
+          if ((candclustid != cid) && (csize != 0) &&
+              (csize + clusters[cid].size() <= MAX_CLUSTER_SIZE)) {
+            // Merge without duplicates (todo: more efficiently)
+            for (auto elem : clusters[cid]) {
+              if (std::find(clusters[candclustid].begin(),
+                            clusters[candclustid].end(),
+                            elem) == clusters[candclustid].end()) {
+                clusters[candclustid].push_back(elem);
+              }
+            }
+            clusters[cid].clear();
+            while (!frontier.empty()) frontier.pop();
+            break;
           }
         }
-        clusters[cid].clear();
-        while (!frontier.empty()) frontier.pop();
-        break;
+
+        // Push the neighbors of cand into the frontier.
+        for (auto nbrid = 0; nbrid < G[cand].size(); nbrid++) {
+          auto nbr = G[cand][nbrid];
+          if (!seen[nbr]) {
+            distanceType ndist =
+                leader_points[leader].distance(leader_points[nbr]);
+            frontier.push({ndist, nbr});
+          }
+        }
       }
     }
-    
-    // Push the neighbors of cand into the frontier.
-    for (auto nbrid = 0; nbrid < G[cand].size(); nbrid++) {
-      auto nbr = G[cand][nbrid];
-      if (!seen[nbr]) {
-        distanceType ndist = leader_points[leader].distance(leader_points[nbr]);
-        frontier.push({ndist, nbr});
-      }
-    }
-  }
-}
-
-
 
     // for (auto i = 0; i < 20; i++) {
     //   std::cout << clusters[i].size() << " ";
@@ -282,7 +287,8 @@ for (size_t cid = 0; cid < clusters.size(); cid++) {
     return clusters;
   }
 
-  auto PruneSLINK_wrapper(GraphI &G, PR &Points, size_t num_clusters, size_t cluster_size) {
+  auto PruneSLINK_wrapper(GraphI &G, PR &Points, size_t num_clusters,
+                          size_t cluster_size) {
     std::random_device rd;
     std::mt19937 rng(rd());
     std::uniform_int_distribution<int> uni(0, Points.size());
@@ -295,10 +301,9 @@ for (size_t cid = 0; cid < clusters.size(); cid++) {
     t.next("buckets time");
     std::cout << "Computed buckets!" << std::endl;
     // Build on each bucket.
-    parlay::parallel_for(0, buckets.size(),
-                         [&](size_t i) {
-                           if (buckets[i].size() != 0) RunLeaf(G, Points, buckets[i]);
-                         });
+    parlay::parallel_for(0, buckets.size(), [&](size_t i) {
+      if (buckets[i].size() != 0) RunLeaf(G, Points, buckets[i]);
+    });
     t.next("build leaf time");
   }
 
@@ -313,27 +318,27 @@ for (size_t cid = 0; cid < clusters.size(); cid++) {
     // sample leaders
     size_t num_leaders =
         (depth == 0) ? TOP_LEVEL_NUM_LEADERS : ids.size() * FRACTION_LEADERS;
-    //if (depth < 5 && TOP_LEVEL_NUM_LEADERS < num_leaders) {
-    //  num_leaders = TOP_LEVEL_NUM_LEADERS;
-    //}
+    // if (depth < 5 && TOP_LEVEL_NUM_LEADERS < num_leaders) {
+    //   num_leaders = TOP_LEVEL_NUM_LEADERS;
+    // }
     num_leaders = std::min<size_t>(num_leaders, MAX_NUM_LEADERS);
     num_leaders = std::max<size_t>(num_leaders, 3);
     lock.lock();
-    COMPARISONS += num_leaders*ids.size();
+    COMPARISONS += num_leaders * ids.size();
     lock.unlock();
     Bucket leaders(num_leaders);
     std::mt19937 prng(seed);
     size_t next_seed = parlay::hash64(seed);
     std::sample(ids.begin(), ids.end(), leaders.begin(), leaders.size(), prng);
 
-    //		std::cout << "after sampling: leaders size " << leaders.size() <<
-    //std::endl;
+    //		std::cout << "after sampling: leaders size " << leaders.size()
+    //<< std::endl;
     auto leader_points = PointRange(Points, leaders);
     std::vector<Bucket> clusters(leaders.size());
     //		std::cout << "Computing clusters" << std::endl;
 
-		parlay::internal::timer t;
-		t.start();
+    parlay::internal::timer t;
+    t.start();
     {  // less readable than map + zip + flatten, but at least it's as efficient
        // as possible for fanout = 1
       parlay::sequence<std::pair<uint32_t, uint32_t>> flat(ids.size() * fanout);
@@ -354,9 +359,9 @@ for (size_t cid = 0; cid < clusters.size(); cid++) {
       });
     }
     //		std::cout << "Assigned to closest leaders" << std::endl;
-		if (depth == 0) {
-			t.next("first level assign time");
-		}
+    if (depth == 0) {
+      t.next("first level assign time");
+    }
 
     leaders.clear();
 
@@ -409,18 +414,18 @@ for (size_t cid = 0; cid < clusters.size(); cid++) {
             }
           } else {
             // The normal case
-            recursive_buckets =
-                RecursivelySketch(Points, clusters[cluster_id], cluster_size,
-                                  depth + 1, /*fanout=*/1, next_seed + cluster_id);
+            recursive_buckets = RecursivelySketch(
+                Points, clusters[cluster_id], cluster_size, depth + 1,
+                /*fanout=*/1, next_seed + cluster_id);
           }
           rec_buckets[cluster_id] = std::move(recursive_buckets);
         },
         1);
 
-    for (size_t cluster_id=0; cluster_id < clusters.size(); ++cluster_id) {
+    for (size_t cluster_id = 0; cluster_id < clusters.size(); ++cluster_id) {
       while (!rec_buckets[cluster_id].empty()) {
         size_t index = rec_buckets[cluster_id].size();
-        buckets.push_back(std::move(rec_buckets[cluster_id][index-1]));
+        buckets.push_back(std::move(rec_buckets[cluster_id][index - 1]));
         rec_buckets[cluster_id].pop_back();
       }
     }
@@ -436,15 +441,14 @@ for (size_t cid = 0; cid < clusters.size(); cid++) {
     auto ids = parlay::tabulate(Points.size(), [&](uint32_t i) { return i; });
     parlay::internal::timer t;
     t.start();
-    auto buckets = RecursivelySketch(Points, ids, cluster_size, 0, FANOUT, SEED);
-		SEED = parlay::hash64(SEED);
+    auto buckets =
+        RecursivelySketch(Points, ids, cluster_size, 0, FANOUT, SEED);
+    SEED = parlay::hash64(SEED);
     t.next("buckets time");
     std::cout << "Computed buckets!" << std::endl;
     // Build on each bucket.
     parlay::parallel_for(0, buckets.size(),
-                         [&](size_t i) {
-                           RunLeaf(G, Points, buckets[i]);
-                         });
+                         [&](size_t i) { RunLeaf(G, Points, buckets[i]); });
     t.next("build leaf time");
   }
 
@@ -454,16 +458,18 @@ for (size_t cid = 0; cid < clusters.size(); cid++) {
       if (MULTI_PIVOT) {
         recursively_sketch_wrapper(G, Points, cluster_size);
       } else {
-        //random_clustering_wrapper(G, Points, cluster_size);
+        // random_clustering_wrapper(G, Points, cluster_size);
         double t = (double)i / (num_clusters - 1);
         // size_t num_leaders = num_clusters > 1
-        //   ? TOP_LEVEL_NUM_LEADERS / 5 + t * (TOP_LEVEL_NUM_LEADERS - TOP_LEVEL_NUM_LEADERS / 5)
-        //   : TOP_LEVEL_NUM_LEADERS;
+        //   ? TOP_LEVEL_NUM_LEADERS / 5 + t * (TOP_LEVEL_NUM_LEADERS -
+        //   TOP_LEVEL_NUM_LEADERS / 5) : TOP_LEVEL_NUM_LEADERS;
         size_t num_leaders = TOP_LEVEL_NUM_LEADERS;
-        std::cout << "TOP_LEVEL_NUM_LEADERS: " << TOP_LEVEL_NUM_LEADERS << std::endl;
+        std::cout << "TOP_LEVEL_NUM_LEADERS: " << TOP_LEVEL_NUM_LEADERS
+                  << std::endl;
         std::cout << "t: " << t << std::endl;
-        std::cout << "Building cluster with " << num_leaders << " leaders" << std::endl;
-        PruneSLINK_wrapper(G,Points,num_leaders,cluster_size);
+        std::cout << "Building cluster with " << num_leaders << " leaders"
+                  << std::endl;
+        PruneSLINK_wrapper(G, Points, num_leaders, cluster_size);
       }
       std::cout << "Built cluster " << i << " of " << num_clusters << std::endl;
       std::cout << "Leaf count: " << leaf_count << std::endl;
@@ -473,8 +479,9 @@ for (size_t cid = 0; cid < clusters.size(); cid++) {
 
   /*  Leaf code  */
   // parameters dim and K are just to interface with the cluster tree code
- 
-  void RunLeaf(GraphI &G, PR &Points, parlay::sequence<uint32_t> &active_indices) {
+
+  void RunLeaf(GraphI &G, PR &Points,
+               parlay::sequence<uint32_t> &active_indices) {
     if (LEAF_ALG == "VamanaLeaf") {
       VamanaLeaf(G, Points, active_indices);
     } else if (LEAF_ALG == "MSTk") {
@@ -490,7 +497,7 @@ for (size_t cid = 0; cid < clusters.size(); cid++) {
   }
 
   void VamanaLeaf(GraphI &G, PR &Points,
-                         parlay::sequence<uint32_t> &active_indices) {
+                  parlay::sequence<uint32_t> &active_indices) {
     BuildParams BP;
     BP.R = MST_DEG;
     BP.L = MST_DEG * 2;
@@ -498,7 +505,8 @@ for (size_t cid = 0; cid < clusters.size(); cid++) {
     BP.num_passes = 2;
     BP.single_batch = 0;
 
-    auto edges = run_vamana_on_indices(active_indices, Points, BP, /*parallel=*/true);
+    auto edges =
+        run_vamana_on_indices(active_indices, Points, BP, /*parallel=*/true);
     utils::process_edges(G, std::move(edges));
 
     lock.lock();
@@ -508,7 +516,8 @@ for (size_t cid = 0; cid < clusters.size(); cid++) {
     leaf_count++;
   }
 
-  void QuadPrune(GraphI &G, PR &Points, parlay::sequence<uint32_t> &active_indices) {
+  void QuadPrune(GraphI &G, PR &Points,
+                 parlay::sequence<uint32_t> &active_indices) {
     BuildParams BP;
     BP.R = MST_DEG;
     BP.alpha = ALPHA;
@@ -523,7 +532,7 @@ for (size_t cid = 0; cid < clusters.size(); cid++) {
   }
 
   void DistMatQuadPrune(GraphI &G, PR &Points,
-                       parlay::sequence<uint32_t> &active_indices) {
+                        parlay::sequence<uint32_t> &active_indices) {
     BuildParams BP;
     BP.R = MST_DEG;
     BP.alpha = ALPHA;
@@ -538,15 +547,15 @@ for (size_t cid = 0; cid < clusters.size(); cid++) {
   }
 
   // parameters dim and K are just to interface with the cluster tree code
-  void MSTk(GraphI &G, PR &Points,
-                   parlay::sequence<uint32_t> &active_indices) {
+  void MSTk(GraphI &G, PR &Points, parlay::sequence<uint32_t> &active_indices) {
     lock.lock();
     START_POINTS.push_back(active_indices[0]);
 
     double extra_fraction = 0.01;
 
-    //std::mt19937 prng(parlay::hash64(active_indices[0]));
-    //std::sample(active_indices.begin(), active_indices.end(), leaders.begin(), leaders.size(), prng);
+    // std::mt19937 prng(parlay::hash64(active_indices[0]));
+    // std::sample(active_indices.begin(), active_indices.end(),
+    // leaders.begin(), leaders.size(), prng);
     lock.unlock();
 
     // preprocessing for Kruskal's
@@ -617,7 +626,6 @@ for (size_t cid = 0; cid < clusters.size(); cid++) {
     leaf_count++;
   }
 
-
   size_t SEED = 555;
   double FRACTION_LEADERS = 0.005;
   size_t TOP_LEVEL_NUM_LEADERS = 950;
@@ -642,5 +650,3 @@ for (size_t cid = 0; cid < clusters.size(); cid++) {
 };
 
 }  // namespace parlayANN
-
-

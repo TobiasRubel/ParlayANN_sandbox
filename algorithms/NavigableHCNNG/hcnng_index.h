@@ -127,6 +127,7 @@ struct hcnng_index {
     std::cout << "Set MSTDeg to: " << MSTDeg << " MultiPivot to: " << multi_pivot  << " fanout: " << fanout << std::endl;
     C.LEAF_ALG = leaf_method;
     C.FANOUT = fanout;
+
     C.multiple_clustertrees(G, Points, cluster_size, cluster_rounds);
 
     if (vamana_long_range) {

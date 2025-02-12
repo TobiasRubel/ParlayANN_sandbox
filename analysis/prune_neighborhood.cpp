@@ -1,6 +1,7 @@
 #include <iostream>
 #include <cstdint>
 #include <cstring>
+#include <getopt.h>
 
 #include <parlay/sequence.h>
 #include <parlay/parallel.h>
@@ -17,33 +18,94 @@
 #include "vamana/neighbors.h"
 
 #define DATASET 1
-#define EXACT true
+#define USE_GT true
+#define EXACTNESS 0.9
+
+void print_help() {
+    std::cout << "Usage: ./prune_neighborhood [options]" << std::endl;
+    std::cout << "Options:" << std::endl;
+    std::cout << "  -d, --dataset <num>       Dataset number (1 or 2)" << std::endl;
+    std::cout << "  -g, --use_gt              Use ground truth for pruning" << std::endl;
+    std::cout << "  -e, --exactness <value>   Exactness value (default: 0.9)" << std::endl;
+}
+
+struct arguments {
+    int dataset;
+    bool use_gt;
+    double exactness;
+};
+
+void parse_arguments(int argc, char *argv[], arguments &args) {
+    struct option long_options[] = {
+        {"dataset", required_argument, NULL, 'd'},
+        {"use_gt", no_argument, NULL, 'g'},
+        {"exactness", required_argument, NULL, 'e'},
+        {NULL, 0, NULL, 0}
+    };
+
+    args.dataset = 1;
+    args.use_gt = true;
+    args.exactness = 0.9;
+
+    int opt;
+    while ((opt = getopt_long(argc, argv, "d:ge:", long_options, NULL)) != -1) {
+        switch (opt) {
+            case 'd':
+                args.dataset = std::stoi(optarg);
+                break;
+            case 'g':
+                args.use_gt = true;
+                break;
+            case 'e':
+                args.exactness = std::stod(optarg);
+                break;
+            default:
+                print_help();
+                exit(EXIT_FAILURE);
+        }
+    }
+}
 
 int main(int argc, char *argv[]) {
-    #if DATASET == 1
-        std::string base_path = "/ssd1/anndata/ANNbench_/data/sift/sift_base.fbin";
-        std::string query_path = "/ssd1/anndata/ANNbench_/data/sift/sift_query.fbin";
-        std::string gt_path = "/ssd1/anndata/ANNbench_/data/sift/sift_query.gt";
-        std::string exact_path = "/ssd1/richard/anndata/sift_1000nn.gt";
-    #elif DATASET == 2
-        std::string base_path = "/ssd1/anndata/ANNbench_/data/text2image1M/base.fbin";
-        std::string query_path = "/ssd1/anndata/ANNbench_/data/text2image1M/query10K.fbin";
-        std::string gt_path = "/ssd1/anndata/ANNbench_/data/text2image1M/text2image1M.gt";
-        std::string exact_path = "/ssd1/richard/anndata/t2i_1000nn.gt";
-    #endif
+    arguments args;
+    parse_arguments(argc, argv, args);
+
+    std::string base_path, query_path, gt_path, exact_path;
+    int distance_type = 0;
+    switch (args.dataset) {
+        case 1:
+            std::cout << "Dataset: SIFT" << std::endl;
+            base_path = "/ssd1/anndata/ANNbench_/data/sift/sift_base.fbin";
+            query_path = "/ssd1/anndata/ANNbench_/data/sift/sift_query.fbin";
+            gt_path = "/ssd1/anndata/ANNbench_/data/sift/sift_query.gt";
+            exact_path = "/ssd1/richard/anndata/sift_1000nn.gt";
+            break;
+        case 2:
+            std::cout << "Dataset: Text2Image" << std::endl;
+            base_path = "/ssd1/anndata/ANNbench_/data/text2image1M/base.fbin";
+            query_path = "/ssd1/anndata/ANNbench_/data/text2image1M/query10K.fbin";
+            gt_path = "/ssd1/anndata/ANNbench_/data/text2image1M/text2image1M.gt";
+            exact_path = "/ssd1/richard/anndata/t2i_1000nn.gt";
+            distance_type = 1;
+            break;
+        default:
+            std::cerr << "Invalid dataset number." << std::endl;
+            return 1;
+    }
 
     // Build an index out of the base points
     using index_t = uint32_t;
     using value_t = float;
-    #if DATASET == 2
-        using PointType = parlayANN::Mips_Point<value_t>;
-    #else
-        using PointType = parlayANN::Euclidian_Point<value_t>;
-    #endif
+    using PointType = parlayANN::Euclidian_Point<value_t>;
+    //using PointType = parlayANN::Mips_Point<value_t>;
     using PointRangeType = parlayANN::PointRange<PointType>;
     using GraphType = parlayANN::Graph<index_t>;
     size_t max_degree = 32;
-    #if EXACT
+
+    PointRangeType B, Q;
+    parlayANN::groundTruth<index_t> GT, neighborhood;
+    GraphType G;
+    #if USE_GT
         auto B = PointRangeType(base_path.data());
         auto Q = PointRangeType(query_path.data());
         auto GT = parlayANN::groundTruth<index_t>(exact_path.data());
@@ -51,9 +113,10 @@ int main(int argc, char *argv[]) {
         auto G = GraphType(max_degree, B.size());
         auto BP = parlayANN::BuildParams(max_degree, 64, 1.2, 2, false);
         auto I = parlayANN::knn_index<PointRangeType, PointRangeType, index_t>(BP);
+        size_t target_neighborhood_size = 500;
 
         auto neighbors = parlay::tabulate(B.size(), [&](size_t i) {
-            return parlay::tabulate(neighborhood.dim, [&](size_t j) {
+            return parlay::tabulate(target_neighborhood_size, [&](size_t j) {
                 return neighborhood.coordinates(i, j);
             });
         });
@@ -76,11 +139,18 @@ int main(int argc, char *argv[]) {
     // Prune the neighborhoods
     std::cout << "Pruning neighborhoods..." << std::endl;
     auto new_G = GraphType(max_degree, B.size());
+    auto pruned_neighbors = parlay::tabulate(B.size(), [&](size_t i) {
+        return I.robustPrune(i, neighbors[i], G, B, 1.2, false).first;
+    });
+    auto adjlist_sizes = parlay::delayed_tabulate(B.size(), [&](size_t i) {
+        return pruned_neighbors[i].size();
+    });
+    std::cout << "Max degree: " << parlay::reduce(adjlist_sizes, parlay::maxm<size_t>()) << std::endl;
+    std::cout << "Avg degree: " << (double)parlay::reduce(adjlist_sizes, parlay::addm<size_t>()) / B.size() << std::endl;
     parlay::parallel_for(0, B.size(), [&](size_t i) {
-        auto [pruned, _] = I.robustPrune(i, neighbors[i], G, B, 1.2, false);
         new_G[i].clear_neighbors();
-        for (size_t j = 0; j < pruned.size() && j < max_degree; j++) {
-            new_G[i].append_neighbor(pruned[j]);
+        for (size_t j = 0; j < pruned_neighbors[i].size() && j < max_degree; j++) {
+            new_G[i].append_neighbor(pruned_neighbors[i][j]);
         }
     });
 

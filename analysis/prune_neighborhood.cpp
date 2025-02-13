@@ -182,6 +182,36 @@ int main(int argc, char *argv[]) {
         });
     }
 
+    if (args.bfs_candidates > 0) {
+        std::cout << "Replacing adjacency lists with first " << args.bfs_candidates << " BFS levels..." << std::endl;
+        auto VG = GraphType(max_degree, B.size());
+        auto BP = parlayANN::BuildParams(max_degree, 64, 1.2, 2, false);
+        auto I = parlayANN::knn_index<PointRangeType, PointRangeType, index_t>(BP);
+        parlayANN::stats<index_t> sbuild(size_t(B.size()));
+        I.build_index(VG, B, B, sbuild);
+
+        auto visited = parlay::tabulate<std::atomic<bool>>(B.size(), [] (size_t i) { return false; });
+        visited[0] = true;
+        neighbors[0] = parlay::tabulate(VG[0].size(), [&] (size_t i) { return VG[0][i]; });
+        parlay::sequence<index_t> frontier(1, 0);
+        size_t depth = 1;
+        while (frontier.size() > 0 && depth < args.bfs_candidates) {
+            auto out_neighbors = parlay::flatten(
+                parlay::map(frontier, [&] (index_t i) {
+                    return parlay::make_slice<index_t*, index_t*>(VG[i].begin(), VG[i].end());
+                })
+            );
+            frontier = parlay::filter(out_neighbors, [&] (index_t i) {
+                bool exp = false;
+                return (!visited[i] && visited[i].compare_exchange_strong(exp, true));
+            });
+            parlay::parallel_for(0, frontier.size(), [&] (size_t i) {
+                neighbors[frontier[i]] = parlay::tabulate(VG[frontier[i]].size(), [&] (size_t j) { return VG[frontier[i]][j]; });
+            });
+            depth++;
+        }
+    }
+
     auto adjlist_sizes = parlay::delayed_tabulate(B.size(), [&](size_t i) {
         return neighbors[i].size();
     });

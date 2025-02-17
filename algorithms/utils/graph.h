@@ -203,6 +203,51 @@ struct Graph{
     delete[] degrees_start;
   }
 
+  // Resizes the graph storage to the actual maximum degree.
+  void resize() {
+    // Step 1: Compute the actual maximum degree.
+    indexType actual_max = 0;
+    for (size_t i = 0; i < n; i++) {
+      // Each vertex's degree is stored at the beginning of its block.
+      indexType deg = (*this)[i].size();
+      if (deg > actual_max)
+        actual_max = deg;
+    }
+
+    // If the actual maximum degree is the same as the allocated one, no resize is needed.
+    if (actual_max == maxDeg) return;
+
+    // Step 2: Allocate new memory for the graph.
+    // Each vertex will now have actual_max+1 entries.
+    size_t new_stride = actual_max + 1;
+    size_t total_count = n * new_stride;
+    indexType* new_graph = (indexType*) aligned_alloc(1L << 21, total_count * sizeof(indexType));
+    if (new_graph == nullptr) {
+      std::cerr << "Allocation failed in resize()" << std::endl;
+      abort();
+    }
+    madvise(new_graph, total_count * sizeof(indexType), MADV_HUGEPAGE);
+
+    // Step 3: Copy each vertex's data (its degree and neighbor list) into the new array.
+    // We can do this in parallel since each vertex is independent.
+    parlay::parallel_for(0, n, [&](size_t i) {
+      // Get pointers to the old and new rows.
+      indexType* old_row = graph.get() + i * (maxDeg + 1);
+      indexType* new_row = new_graph + i * new_stride;
+
+      // Copy the degree count.
+      new_row[0] = old_row[0];
+      // Copy the neighbor list.
+      for (size_t j = 0; j < new_row[0]; j++) {
+        new_row[j + 1] = old_row[j + 1];
+      }
+    });
+
+    // Step 4: Update the graph's data pointer and maximum degree.
+    graph.reset(new_graph, std::free);
+    maxDeg = actual_max;
+  }
+
   void save(char* oFile) {
     std::cout << "Writing graph with " << n
               << " points and max degree " << maxDeg

@@ -250,6 +250,47 @@ auto distmat_quadprune(Seq &seq, PR &all_points, BuildParams &BP, bool parallel=
   return edges;
 }
 
+template <typename PR, typename Seq>
+auto run_fastprune(Seq &seq, PR &all_points, BuildParams &BP, bool parallel=true) {
+  using indexType = uint32_t;
+  Graph<indexType> G(BP.R, seq.size());
+
+  using edge = std::pair<uint32_t, uint32_t>;
+  parlay::sequence<edge> edges;
+
+  PR points = PR(all_points, seq);
+  using findex = knn_index<PR, PR, indexType>;
+  findex I(BP);
+  stats<unsigned int> BuildStats(G.size());
+
+  using distanceType = typename PR::Point::distanceType;
+  auto dist_mat = new distanceType[seq.size() * seq.size()];
+  for (size_t a = 0; a < 2; a++) {
+    size_t i_min = a * seq.size() / 2, i_max = (a + 1) * seq.size() / 2;
+    for (size_t b = a; b < 2; b++) {
+      size_t j_min = b * seq.size() / 2, j_max = (b + 1) * seq.size() / 2;
+      for (size_t i = i_min; i < i_max; ++i) {
+        for (size_t j = std::max(i + 1, j_min); j < j_max; ++j) {
+          dist_mat[i * seq.size() + j] = dist_mat[j * seq.size() + i] = points[i].distance(points[j]);
+        }
+      }
+    }
+  }
+  // std::cout << "Distance matrix generated: " << t.next_time() << std::endl;
+
+  I.distmat_fastprune(G, points, points, dist_mat, BuildStats, true, false);
+  // std::cout << "Pruning done: " << t.next_time() << std::endl;
+  for (size_t i=0; i < G.size(); ++i) {
+    size_t our_ind = seq[i];
+    for (size_t j=0; j < G[i].size(); ++j) {
+      auto neighbor_ind = seq[G[i][j]];
+      edges.push_back(std::make_pair(our_ind, neighbor_ind));
+    }
+  }
+  delete[] dist_mat;
+  return edges;
+}
+
 class SpinLock {
 public:
     // boilerplate to make it 'copyable'. but we just clear the spinlock. there is never a use case to copy a locked spinlock

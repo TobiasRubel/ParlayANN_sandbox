@@ -483,7 +483,9 @@ for (size_t cid = 0; cid < clusters.size(); cid++) {
       QuadPrune(G, Points, active_indices);
     } else if (LEAF_ALG == "DistMatQuadPrune") {
       DistMatQuadPrune(G, Points, active_indices);
-    } else {
+    } else if (LEAF_ALG == "FastPrune") {
+      FastPrune(G, Points, active_indices);  
+    }else {
       std::cout << "Unknown leaf method: " << LEAF_ALG << std::endl;
       exit(0);
     }
@@ -528,6 +530,21 @@ for (size_t cid = 0; cid < clusters.size(); cid++) {
     BP.R = MST_DEG;
     BP.alpha = ALPHA;
     auto edges = distmat_quadprune(active_indices, Points, BP);
+    utils::process_edges(G, std::move(edges));
+
+    lock.lock();
+    START_POINTS.push_back(active_indices[0]);
+    lock.unlock();
+
+    leaf_count++;
+  }
+
+  void FastPrune(GraphI &G, PR &Points,
+                       parlay::sequence<uint32_t> &active_indices) {
+    BuildParams BP;
+    BP.R = MST_DEG;
+    BP.alpha = ALPHA;
+    auto edges = run_fastprune(active_indices, Points, BP);
     utils::process_edges(G, std::move(edges));
 
     lock.lock();

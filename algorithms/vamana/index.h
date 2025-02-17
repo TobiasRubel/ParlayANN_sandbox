@@ -27,6 +27,9 @@
 #include <algorithm>
 #include <random>
 #include <set>
+#include <cmath>
+#include <vector>
+#include <utility>
 
 #include "../utils/point_range.h"
 #include "../utils/graph.h"
@@ -199,6 +202,136 @@ struct knn_index {
   }
 
 
+  // Prune using distance matrix. This is specialized code only called
+  // in the "all-prune" case and does not handle add/remove_dups, like
+  // the original code above.
+  std::pair<parlay::sequence<indexType>, long>
+  FastPruneDistMat(indexType p, std::vector<pid>& candidates, distanceType *dist_mat,
+                     PR &Points, double alpha) {
+    // add out neighbors of p to the candidate set.
+    long distance_comps = 0;
+    size_t N = Points.size();
+    auto nconsider = BP.R*3;
+    if (nconsider > N) nconsider = N;
+    // Sort the candidate set according to distance from p
+    auto less = [&](std::pair<indexType, distanceType> a, std::pair<indexType, distanceType> b) {
+      return a.second < b.second || (a.second == b.second && a.first < b.first);
+    };
+    //std::sort(candidates.begin(), candidates.end(), less);
+    std::partial_sort(candidates.begin(),candidates.begin()+ nconsider, candidates.end(), less);
+    std::vector<indexType> new_nbhs;
+    new_nbhs.reserve(BP.R);
+    new_nbhs.push_back(candidates[0].first);
+    size_t candidate_idx = 1;
+    indexType p_star = new_nbhs[0];
+    while (new_nbhs.size() < BP.R && candidate_idx < candidates.size()) {
+      // Don't need to do modifications.
+      int p_prime = candidates[candidate_idx].first;
+      // With this modification, p_star should not be -1.
+      if (p_prime == p || p_prime == -1) {
+        candidate_idx++;
+        continue;
+      }
+
+      bool add = true;
+      for (auto p_star : new_nbhs) {
+        distance_comps++;
+        distanceType dist_starprime =  dist_mat[p_prime*N + p_star];
+        distanceType dist_pprime = candidates[candidate_idx].second;
+        if (alpha * dist_starprime <= dist_pprime) {
+          add = false;
+          break;
+        }
+      }
+      if (add)  new_nbhs.push_back(p_prime);
+      candidate_idx++;
+    }
+
+    auto new_neighbors_seq = parlay::to_sequence(new_nbhs);
+    return std::pair(new_neighbors_seq, distance_comps);
+  }
+
+// //-----------------------------------------------------------------------
+// template <typename PointType>
+// double angleDegrees(const PointType &candidate, const PointType &p, const PointType &p_star, int dim) {
+//   double dot = 0.0;
+//   double norm_candidate = 0.0;
+//   double norm_pstar = 0.0;
+//   for (int i = 0; i < dim; i++) {
+//     double diff_candidate = candidate[i] - p[i];
+//     double diff_pstar    = p_star[i] - p[i];
+//     dot += diff_candidate * diff_pstar;
+//     norm_candidate += diff_candidate * diff_candidate;
+//     norm_pstar    += diff_pstar * diff_pstar;
+//   }
+//   double norm_product = std::sqrt(norm_candidate * norm_pstar);
+//   if (norm_product == 0.0)
+//     return 0.0;  // degenerate case: treat as 0°.
+//   double cos_val = dot / norm_product;
+//   // Clamp to [-1,1] to account for any numerical inaccuracies.
+//   if (cos_val > 1.0) cos_val = 1.0;
+//   if (cos_val < -1.0) cos_val = -1.0;
+//   double angle_rad = std::acos(cos_val);
+//   double angle_deg = angle_rad * 180.0 / M_PI;
+//   return angle_deg;
+// }
+
+// //-----------------------------------------------------------------------
+// std::pair<parlay::sequence<indexType>, long>
+// FastPruneDistMat(indexType p, std::vector<pid>& candidates, distanceType *dist_mat,
+//                  PR &Points, double alpha) {
+//   // add out neighbors of p to the candidate set.
+//   long distance_comps = 0;
+//   size_t N = Points.size();
+
+//   // Sort the candidate set according to distance from p
+//   auto less = [&](std::pair<indexType, distanceType> a, std::pair<indexType, distanceType> b) {
+//     return a.second < b.second || (a.second == b.second && a.first < b.first);
+//   };
+//   std::sort(candidates.begin(), candidates.end(), less);
+
+//   std::vector<indexType> new_nbhs;
+//   new_nbhs.reserve(BP.R);
+
+//   size_t candidate_idx = 0;
+  
+//   auto dim = Points.dimension(); 
+
+//   while (new_nbhs.size() < BP.R && candidate_idx < candidates.size()) {
+//     int p_prime = candidates[candidate_idx].first;
+//     // With this modification, p_star should not be -1.
+//     if (p_prime == p || p_prime == -1) {
+//       candidate_idx++;
+//       continue;
+//     }
+
+//     // Modified candidate-addition logic.
+//     // If no neighbor has been added yet, add the first candidate.
+//     bool add = true;
+//     // Otherwise, check the cosine angle between (Points[p_prime]-Points[p])
+//     // and (Points[p_star]-Points[p]) for each already–accepted neighbor.
+//     for (auto p_star : new_nbhs) {
+//       distance_comps++;
+//       double cos_angle = angleDegrees(Points[p_prime], Points[p], Points[p_star], dim);
+//       if (cos_angle < alpha) { 
+//         add = false;
+//         break;
+//       }
+//     }
+//     if (add) new_nbhs.push_back(p_prime);
+//     candidate_idx++;
+//   }
+
+//   auto new_neighbors_seq = parlay::to_sequence(new_nbhs);
+//   return std::pair(new_neighbors_seq, distance_comps);
+// }
+
+
+
+
+
+
+
   //wrapper to allow calling robustPrune on a sequence of candidates
   //that do not come with precomputed distances
   std::pair<parlay::sequence<indexType>, long>
@@ -319,6 +452,28 @@ struct knn_index {
         cc.push_back(std::make_pair(j, dist_mat[i * Points.size() + j]));
       }
       auto [neighbors, distance_comps] = robustPruneDistMat(i, cc, dist_mat, Points, BP.alpha);
+      G[i].update_neighbors(neighbors);
+    }
+
+    if (sort_neighbors) {
+      for (size_t i=0; i<G.size(); ++i) {
+        auto less = [&] (indexType j, indexType k) {
+          return Points[i].distance(Points[j]) < Points[i].distance(Points[k]);};
+        G[i].sort(less);
+      }
+    }
+  }
+
+    void distmat_fastprune(GraphI &G, PR &Points, QPR &QPoints, distanceType *dist_mat,
+                   stats<indexType> &BuildStats, bool sort_neighbors = true, bool print = true) {
+    set_start();
+    for (size_t i=0; i < Points.size(); ++i) {
+      std::vector<pid> cc;
+      cc.reserve(Points.size()); // + size_of(p->out_nbh));
+      for (size_t j=0; j<Points.size(); ++j) {
+        cc.push_back(std::make_pair(j, dist_mat[i * Points.size() + j]));
+      }
+      auto [neighbors, distance_comps] = FastPruneDistMat(i, cc, dist_mat, Points, BP.alpha);
       G[i].update_neighbors(neighbors);
     }
 

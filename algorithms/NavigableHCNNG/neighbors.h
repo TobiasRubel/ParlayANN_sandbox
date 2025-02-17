@@ -70,6 +70,7 @@ void ANN(Graph<indexType> &G, long k, BuildParams &BP,
   auto [avg_deg, max_deg] = graph_stats_(G);
   Graph_ G_(name, params, G.size(), avg_deg, max_deg, idx_time);
   G_.print();
+  G.resize();
 
   if(Query_Points.size() != 0)
     search_and_parse(G_, G, Points, Query_Points, GT, res_file, exp_prefix, k, BP.verbose);

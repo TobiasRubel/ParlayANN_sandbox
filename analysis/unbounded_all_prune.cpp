@@ -99,9 +99,9 @@ int main(int argc, char *argv[]) {
 
             bool add = true;
             for (index_t w : curr_neighbors) {
-                value_t uv_dist = distances[u];
+                value_t vw_dist = distances[w];
                 value_t uw_dist = points[u].distance(points[w]);
-                if (uw_dist * args.alpha < uv_dist) {
+                if (uw_dist * args.alpha < vw_dist) {
                     add = false;
                     break;
                 }

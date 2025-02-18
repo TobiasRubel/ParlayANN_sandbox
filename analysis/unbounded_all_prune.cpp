@@ -2,9 +2,7 @@
 #include <cstdint>
 #include <cstring>
 #include <random>
-#include <atomic>
-#include <thread>
-#include <chrono>
+#include <mutex>
 #include <getopt.h>
 
 #include <parlay/sequence.h>
@@ -75,59 +73,52 @@ int main(int argc, char *argv[]) {
     PointRangeType points;
     points = PointRangeType(args.base_path.data());
 
-    parlay::sequence<std::vector<index_t>> neighbors;
-    std::atomic<size_t> progress = 0;
-    size_t max_progress = args.sample_size;
-    parlay::parallel_do(
-        [&] () {
-            parlay::random_generator gen;
-            std::uniform_int_distribution<index_t> int_dis(0, points.size() - 1);
-            neighbors = parlay::tabulate(args.sample_size, [&](size_t i) {
-                auto tgen = gen[i];
-                index_t v = int_dis(tgen);
+    parlay::random_generator gen;
+    std::uniform_int_distribution<index_t> int_dis(0, points.size() - 1);
+    size_t progress = 0, max_progress = args.sample_size;
+    std::mutex progress_lock;
+    auto neighbors = parlay::tabulate(args.sample_size, [&](size_t i) {
+        auto tgen = gen[i];
+        index_t v = int_dis(tgen);
 
-                std::vector<index_t> candidates(points.size());
-                std::iota(candidates.begin(), candidates.end(), 0);
-                std::vector<value_t> distances;
-                for (size_t j = 0; j < points.size(); j++) {
-                    if (j == v) candidates.push_back(0);
-                    else distances.push_back(points[v].distance(points[j]));
-                }
-
-                std::sort(candidates.begin(), candidates.end(), [&](index_t a, index_t b) {
-                    return distances[a] < distances[b];
-                });
-
-                std::vector<index_t> neighbors;
-                for (index_t u : candidates) {
-                    if (u == v) continue;
-
-                    bool add = true;
-                    for (index_t w : neighbors) {
-                        value_t uv_dist = distances[u];
-                        value_t uw_dist = points[u].distance(points[w]);
-                        if (uw_dist * args.alpha < uv_dist) {
-                            add = false;
-                            break;
-                        }
-                    }
-
-                    if (add) neighbors.push_back(candidates[u]);
-                }
-
-                return neighbors;
-            });
-        },
-        [&] () {
-            while (progress < max_progress) {
-                std::cout << "\rProgress: " << progress << "/" << max_progress << std::flush;
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            }
+        std::vector<index_t> candidates(points.size());
+        std::iota(candidates.begin(), candidates.end(), 0);
+        std::vector<value_t> distances;
+        for (size_t j = 0; j < points.size(); j++) {
+            if (j == v) candidates.push_back(0);
+            else distances.push_back(points[v].distance(points[j]));
         }
-    );
-    std::cout << "\rProgress: " << progress << "/" << max_progress << std::endl;
+
+        std::sort(candidates.begin(), candidates.end(), [&](index_t a, index_t b) {
+            return distances[a] < distances[b];
+        });
+
+        std::vector<index_t> curr_neighbors;
+        for (index_t u : candidates) {
+            if (u == v) continue;
+
+            bool add = true;
+            for (index_t w : curr_neighbors) {
+                value_t uv_dist = distances[u];
+                value_t uw_dist = points[u].distance(points[w]);
+                if (uw_dist * args.alpha < uv_dist) {
+                    add = false;
+                    break;
+                }
+            }
+
+            if (add) curr_neighbors.push_back(candidates[u]);
+        }
+
+        std::lock_guard lock(progress_lock);
+        std::cout << "\rProgress: " << ++progress << "/" << max_progress << std::flush;
+        return curr_neighbors;
+    });
+    std::cout << std::endl;
 
     auto degrees = parlay::map(neighbors, [](auto &n) { return n.size(); });
     size_t max_degree = parlay::reduce(degrees, parlay::maxm<size_t>());
     double avg_degree = parlay::reduce(degrees, parlay::addm<size_t>()) / (double)args.sample_size;
+    std::cout << "Max degree: " << max_degree << std::endl;
+    std::cout << "Avg degree: " << avg_degree << std::endl;
 }

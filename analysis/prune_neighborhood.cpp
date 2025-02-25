@@ -139,7 +139,7 @@ int main(int argc, char *argv[]) {
         I.build_index(VG, B, B, sbuild);
 
         std::cout << "Obtaining approximate neighborhoods..." << std::endl;
-        auto QP = parlayANN::QueryParams(args.neighborhood_size, 1000, 1.35, B.size(), max_degree, 1);
+        auto QP = parlayANN::QueryParams(500, 1000, 1.35, B.size(), max_degree, 1);
         auto candidates = parlayANN::qsearchAll<PointRangeType, PointRangeType, PointRangeType, index_t>(B, B, B, VG, B, B, B, sbuild, 0, QP);
 
         std::cout << "Pruning neighborhoods..." << std::endl;

@@ -117,8 +117,10 @@ int main(int argc, char *argv[]) {
     std::cout << std::endl;
 
     auto degrees = parlay::map(neighbors, [](auto &n) { return n.size(); });
+    size_t min_degree = parlay::reduce(degrees, parlay::minm<size_t>());
     size_t max_degree = parlay::reduce(degrees, parlay::maxm<size_t>());
     double avg_degree = parlay::reduce(degrees, parlay::addm<size_t>()) / (double)args.sample_size;
+    std::cout << "Min degree: " << min_degree << std::endl;
     std::cout << "Max degree: " << max_degree << std::endl;
     std::cout << "Avg degree: " << avg_degree << std::endl;
 }

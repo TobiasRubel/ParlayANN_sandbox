@@ -148,6 +148,86 @@ struct knn_index {
     return std::pair(new_neighbors_seq, distance_comps);
   }
 
+  std::pair<parlay::sequence<indexType>, long>
+  randomPrune(indexType p, parlay::sequence<pid>& cand,
+              GraphI &G, PR &Points, double alpha, bool add = true, bool rem_dup = true) {
+    // add out neighbors of p to the candidate set.
+    size_t out_size = G[p].size();
+    std::vector<pid> candidates;
+    long distance_comps = 0;
+    for (auto x : cand) candidates.push_back(x);
+
+    if(add){
+      for (size_t i=0; i<out_size; i++) {
+        distance_comps++;
+        candidates.push_back(std::make_pair(G[p][i], Points[G[p][i]].distance(Points[p])));
+      }
+    }
+
+    // Sort the candidate set according to distance from p
+    auto less = [&](std::pair<indexType, distanceType> a, std::pair<indexType, distanceType> b) {
+      return a.second < b.second || (a.second == b.second && a.first < b.first);
+    };
+    std::sort(candidates.begin(), candidates.end(), less);
+
+    if (rem_dup) {
+      // remove any duplicates
+      auto new_end =std::unique(candidates.begin(), candidates.end(),
+  			      [&] (auto x, auto y) {return x.first == y.first;});
+      candidates = std::vector(candidates.begin(), new_end);
+    }
+
+    std::vector<indexType> new_nbhs;
+    new_nbhs.reserve(BP.R);
+
+    size_t candidate_idx = 0;
+
+    while (new_nbhs.size() < BP.R && candidate_idx < candidates.size()) {
+      // Don't need to do modifications.
+      int p_star = candidates[candidate_idx].first;
+      candidate_idx++;
+      if (p_star == p || p_star == -1) {
+        continue;
+      }
+
+      std::vector<indexType> pruned_cands;
+      pruned_cands.push_back(p_star);
+
+      for (size_t i = candidate_idx; i < candidates.size(); i++) {
+        int p_prime = candidates[i].first;
+        if (p_prime != -1) {
+          distance_comps++;
+          distanceType dist_starprime = Points[p_star].distance(Points[p_prime]);
+          distanceType dist_pprime = candidates[i].second;
+          if (alpha * dist_starprime <= dist_pprime) {
+            candidates[i].first = -1;
+            pruned_cands.push_back(p_prime);
+          }
+        }
+      }
+      
+      int r = rand() % pruned_cands.size();
+      new_nbhs.push_back(pruned_cands[r]);
+    }
+
+    auto new_neighbors_seq = parlay::to_sequence(new_nbhs);
+    return std::pair(new_neighbors_seq, distance_comps);
+  }
+
+  std::pair<parlay::sequence<indexType>, long>
+  randomPrune(indexType p, parlay::sequence<indexType> candidates,
+              GraphI &G, PR &Points, double alpha, bool add = true){
+    parlay::sequence<pid> cc;
+    long distance_comps = 0;
+    cc.reserve(candidates.size());
+    for (size_t i=0; i<candidates.size(); ++i) {
+      distance_comps++;
+      cc.push_back(std::make_pair(candidates[i], Points[candidates[i]].distance(Points[p])));
+    }
+    auto [ngh_seq, dc] = randomPrune(p, cc, G, Points, alpha, add);
+    return std::pair(ngh_seq, dc + distance_comps);
+  }
+
   // Prune using distance matrix. This is specialized code only called
   // in the "all-prune" case and does not handle add/remove_dups, like
   // the original code above.
@@ -363,6 +443,7 @@ struct knn_index {
     }
   }
 
+  #define RANDOM_PRUNE 0
   void batch_insert(parlay::sequence<indexType> &inserts,
                     GraphI &G, PR &Points, QPR &QPoints,
                     stats<indexType> &BuildStats, double alpha,
@@ -439,7 +520,12 @@ struct knn_index {
         BuildStats.increment_visited(index, visited.size());
 
         long rp_distance_comps;
-        std::tie(new_out_[i-floor], rp_distance_comps) = robustPrune(index, visited, G, Points, alpha);
+        std::tie(new_out_[i-floor], rp_distance_comps) = 
+        #if RANDOM_PRUNE
+          randomPrune(index, visited, G, Points, alpha);
+        #else
+          robustPrune(index, visited, G, Points, alpha);
+        #endif
         BuildStats.increment_dist(index, rp_distance_comps);
       });
 
@@ -471,7 +557,12 @@ struct knn_index {
 	  add_neighbors_without_repeats(G[index], candidates);
 	  G[index].update_neighbors(candidates);
         } else {
-          auto [new_out_2_, distance_comps] = robustPrune(index, std::move(candidates), G, Points, alpha);
+          auto [new_out_2_, distance_comps] = 
+          #if RANDOM_PRUNE
+            randomPrune(index, std::move(candidates), G, Points, alpha);
+          #else
+            robustPrune(index, std::move(candidates), G, Points, alpha);
+          #endif
 	  G[index].update_neighbors(new_out_2_);
           BuildStats.increment_dist(index, distance_comps);
         }

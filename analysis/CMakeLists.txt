@@ -1,6 +1,7 @@
 set(TEST_FILES
     custom_beam_search_unit.cpp
 	centrality.cpp
+	beam_shape.cpp
     graph_analysis.cpp
     graph_sparsify.cpp
 	deleting_central_edges.cpp

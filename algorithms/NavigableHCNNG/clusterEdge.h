@@ -450,6 +450,10 @@ for (size_t cid = 0; cid < clusters.size(); cid++) {
 
   void multiple_clustertrees(GraphI &G, PR &Points, long cluster_size,
                              long num_clusters) {
+    if (ONE_PRUNE) {
+      one_prune(G, Points, cluster_size, num_clusters);
+      return;
+    }
     for (long i = 0; i < num_clusters; i++) {
       if (MULTI_PIVOT) {
         recursively_sketch_wrapper(G, Points, cluster_size);
@@ -470,6 +474,82 @@ for (size_t cid = 0; cid < clusters.size(); cid++) {
       std::cout << "# of comparisons: " << COMPARISONS << std::endl;
     }
   }
+
+
+  void process_bucket_neighbors(PR &points,
+    std::vector<Bucket> &Buckets,
+    parlay::sequence<parlay::sequence<std::pair<indexType,indexType>>> &bss,
+    size_t replicate,
+    size_t k) {
+    parlay::sequence<parlay::sequence<std::pair<indexType,indexType>>> temp_bss(Buckets.size());
+    parlay::parallel_for(0, Buckets.size(), [&](size_t idx) {
+      auto seq = Buckets[idx];
+      // Allocate exactly seq.size() * k entries for this bucket.
+      temp_bss[idx] = parlay::sequence<std::pair<indexType,indexType>>(seq.size()*k);
+      parlay::parallel_for(0, seq.size(), [&](size_t i) {
+        auto p = seq[i];
+        // Only consider as many neighbors as available.
+        auto nconsider = std::min(k, seq.size());
+
+        // Change candidate pair type to <indexType, distanceType>.
+        std::vector<std::pair<indexType, distanceType>> candidates(seq.size());
+        for (size_t j = 0; j < seq.size(); j++) {
+          // First element is the neighbor's index, second is the distance.
+          candidates[j] = std::make_pair(seq[j], points[p].distance(points[seq[j]]));
+        }
+
+        // Comparator: sort by distance, then by neighbor index.
+        auto less = [&](const std::pair<indexType, distanceType>& a,
+          const std::pair<indexType, distanceType>& b) {
+          return a.second < b.second || (a.second == b.second && a.first < b.first);
+        };
+
+        // Partially sort the candidates to get the nconsider nearest neighbors.
+        std::partial_sort(candidates.begin(), candidates.begin() + nconsider, candidates.end(), less);
+
+        // Write the results into temp_bss for the current bucket.
+        // Note: Use idx (bucket index) and write into a block of size k per point.
+        for (size_t j = 0; j < nconsider; j++) {
+          temp_bss[idx][i * k + j] = std::make_pair(p, candidates[j].first);
+        }
+        });
+      });
+    // Flatten temp_bss and store the result.
+    bss[replicate] = parlay::flatten(temp_bss);
+}
+
+
+
+
+  void one_prune(GraphI &G, PR &Points, long cluster_size,
+                            long num_clusters) {
+    parlay::internal::timer t;
+    t.start();
+    parlay::sequence<parlay::sequence<std::pair<indexType,indexType>>> bss(num_clusters);
+    for (auto i = 0; i < num_clusters; i++) {
+      auto ids = parlay::tabulate(Points.size(), [&](uint32_t i) { return i; });
+      auto buckets = RecursivelySketch(Points, ids, cluster_size, 0, FANOUT, SEED);
+      SEED = parlay::hash64(SEED);
+      std::cout << "processing bucket neighbors for replicate " << i << std::endl;
+      process_bucket_neighbors(Points, buckets, bss, i, 2*MST_DEG);
+      t.next("buckets time");
+    }
+    // flatten bss and groupby
+    auto flat = parlay::flatten(bss);
+    auto grouped = parlay::group_by_key(flat);
+    //eliminate duplicates and make sure that the source is in the neighborlist
+    parlay::parallel_for(0, grouped.size(), [&](size_t i) {
+      grouped[i].second.push_back(grouped[i].first);
+      grouped[i].second = parlay::remove_duplicates(grouped[i].second);
+    });
+    t.next("flattened and grouped");
+    // now we have to build the graph
+    parlay::parallel_for(0, grouped.size(), [&](size_t i) {
+      nnPrune(G, Points, grouped[i].second, grouped[i].first);
+    });
+    t.next("Build leaf time");
+  }
+
 
   /*  Leaf code  */
   // parameters dim and K are just to interface with the cluster tree code
@@ -554,6 +634,22 @@ for (size_t cid = 0; cid < clusters.size(); cid++) {
     leaf_count++;
   }
 
+  void nnPrune(GraphI &G, PR &Points,
+                       parlay::sequence<uint32_t> &active_indices, uint32_t source) {
+    BuildParams BP;
+    BP.R = MST_DEG;
+    BP.alpha = ALPHA;
+    auto edges = run_nnprune(source, active_indices, Points, BP);
+    utils::process_edges(G, std::move(edges));
+
+    lock.lock();
+    START_POINTS.push_back(active_indices[0]);
+    lock.unlock();
+
+    leaf_count++;
+    }
+
+
   // parameters dim and K are just to interface with the cluster tree code
   void MSTk(GraphI &G, PR &Points,
                    parlay::sequence<uint32_t> &active_indices) {
@@ -634,7 +730,7 @@ for (size_t cid = 0; cid < clusters.size(); cid++) {
     leaf_count++;
   }
 
-
+  bool ONE_PRUNE = false;
   size_t SEED = 555;
   double FRACTION_LEADERS = 0.005;
   size_t TOP_LEVEL_NUM_LEADERS = 950;

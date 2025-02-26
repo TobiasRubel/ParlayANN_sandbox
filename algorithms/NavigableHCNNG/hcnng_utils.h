@@ -262,7 +262,8 @@ auto run_fastprune(Seq &seq, PR &all_points, BuildParams &BP, bool parallel=true
   using findex = knn_index<PR, PR, indexType>;
   findex I(BP);
   stats<unsigned int> BuildStats(G.size());
-
+  // parlay::internal::timer t;
+  // t.start();
   using distanceType = typename PR::Point::distanceType;
   auto dist_mat = new distanceType[seq.size() * seq.size()];
   for (size_t a = 0; a < 2; a++) {
@@ -288,6 +289,38 @@ auto run_fastprune(Seq &seq, PR &all_points, BuildParams &BP, bool parallel=true
     }
   }
   delete[] dist_mat;
+  return edges;
+}
+
+template <typename PR, typename Seq>
+auto run_nnprune(uint32_t source ,Seq &seq, PR &all_points, BuildParams &BP, bool parallel=true) {
+  using indexType = uint32_t;
+  Graph<indexType> G(BP.R, seq.size());
+
+  using edge = std::pair<uint32_t, uint32_t>;
+  parlay::sequence<edge> edges;
+
+  PR points = PR(all_points, seq);
+  using findex = knn_index<PR, PR, indexType>;
+  findex I(BP);
+  stats<unsigned int> BuildStats(G.size());
+
+  size_t source_ind = 0;
+  for (size_t i = 0; i < seq.size(); i++) {
+    if ((size_t)seq[i] == source) {
+      source_ind = i;
+      break;
+    }
+  }
+  I.nn_prune_index(G, source_ind, points, points, BuildStats, true, false);
+  // std::cout << "Pruning done: " << t.next_time() << std::endl;
+  for (size_t i=0; i < G.size(); ++i) {
+    size_t our_ind = seq[i];
+    for (size_t j=0; j < G[i].size(); ++j) {
+      auto neighbor_ind = seq[G[i][j]];
+      edges.push_back(std::make_pair(our_ind, neighbor_ind));
+    }
+  }
   return edges;
 }
 

@@ -97,31 +97,6 @@ struct knn_index {
 
     size_t candidate_idx = 0;
 
-// -- old
-//    while (new_nbhs.size() < BP.R && candidate_idx < candidates.size()) {
-//      // Don't need to do modifications.
-//      int p_star = candidates[candidate_idx].first;
-//      candidate_idx++;
-//      if (p_star == p || p_star == -1) {
-//        continue;
-//      }
-//
-//      new_nbhs.push_back(p_star);
-//
-//      for (size_t i = candidate_idx; i < candidates.size(); i++) {
-//        int p_prime = candidates[i].first;
-//        if (p_prime != -1) {
-//          distance_comps++;
-//          distanceType dist_starprime = Points[p_star].distance(Points[p_prime]);
-//          distanceType dist_pprime = candidates[i].second;
-//          if (alpha * dist_starprime <= dist_pprime) {
-//            candidates[i].first = -1;
-//          }
-//        }
-//      }
-//    }
-
-//    // new
     while (new_nbhs.size() < BP.R && candidate_idx < candidates.size()) {
       // Don't need to do modifications.
       int p_prime = candidates[candidate_idx].first;
@@ -150,6 +125,114 @@ struct knn_index {
     auto new_neighbors_seq = parlay::to_sequence(new_nbhs);
     return std::pair(new_neighbors_seq, distance_comps);
   }
+
+
+  std::pair<parlay::sequence<indexType>, long>
+robustPruneChunk(indexType p, parlay::sequence<pid>& cand,
+            GraphI &G, PR &Points, double alpha, bool add = true, bool rem_dup = true) {
+  size_t out_size = G[p].size();
+  std::vector<pid> candidates;
+  long distance_comps = 0;
+  
+  // Copy initial candidate sequence.
+  for (auto x : cand) {
+    candidates.push_back(x);
+  }
+
+  // Optionally add out-neighbors of p.
+  if(add){
+    for (size_t i = 0; i < out_size; i++) {
+      distance_comps++;
+      // Compute the distance on the fly.
+      candidates.push_back(std::make_pair(G[p][i], Points[G[p][i]].distance(Points[p])));
+    }
+  }
+
+  // Sort candidates by increasing distance (and by id to break ties).
+  auto less = [&](const std::pair<indexType, distanceType>& a,
+                  const std::pair<indexType, distanceType>& b) {
+    return a.second < b.second || (a.second == b.second && a.first < b.first);
+  };
+  std::sort(candidates.begin(), candidates.end(), less);
+
+  // Optionally remove duplicate candidates.
+  if (rem_dup) {
+    auto new_end = std::unique(candidates.begin(), candidates.end(),
+                               [&](const auto &x, const auto &y) { return x.first == y.first; });
+    candidates = std::vector<pid>(candidates.begin(), new_end);
+  }
+
+  std::vector<indexType> new_nbhs;
+  new_nbhs.reserve(BP.R);
+
+  // --- Divide candidates into chunks of size 2^i ---
+  std::vector<size_t> chunk_starts;  // fixed starting indices for each chunk
+  std::vector<size_t> chunk_ends;    // one-past-last indices for each chunk
+  std::vector<size_t> chunk_ptrs;    // current pointer (next unseen element) for each chunk
+
+  size_t start = 0;
+  int i = 0;
+  while (start < candidates.size()) {
+    //size_t chunk_size = 1u << i;             // 2^i
+    size_t chunk_size = 100;
+    size_t end = std::min(start + chunk_size, candidates.size());
+    chunk_starts.push_back(start);
+    chunk_ends.push_back(end);
+    chunk_ptrs.push_back(start);             // initialize pointer to start of chunk
+    start = end;
+    i++;
+  }
+  size_t num_chunks = chunk_starts.size();
+  size_t current_chunk = 0;  // cycle through 0 .. num_chunks-1 in modulo
+
+  // --- Process candidates by cycling through the chunks ---
+  while (new_nbhs.size() < BP.R) {
+    // Check if any chunk still has unseen candidates.
+    bool any_available = false;
+    for (size_t j = 0; j < num_chunks; j++) {
+      if (chunk_ptrs[j] < chunk_ends[j]) {
+        any_available = true;
+        break;
+      }
+    }
+    if (!any_available) break; // no more candidates available
+
+    // Advance to the next non-exhausted chunk.
+    while (chunk_ptrs[current_chunk] >= chunk_ends[current_chunk])
+      current_chunk = (current_chunk + 1) % num_chunks;
+
+    size_t candidate_idx = chunk_ptrs[current_chunk];
+    chunk_ptrs[current_chunk]++;  // mark this candidate as seen
+
+    int p_prime = candidates[candidate_idx].first;
+    // Skip if candidate is the query or an invalid candidate.
+    if (p_prime == p || p_prime == -1) {
+      current_chunk = (current_chunk + 1) % num_chunks;
+      continue;
+    }
+
+    // Check if p_prime should be pruned.
+    bool accept = true;
+    for (auto p_star : new_nbhs) {
+      distance_comps++;
+      distanceType dist_starprime = Points[p_star].distance(Points[p_prime]);
+      distanceType dist_pprime    = candidates[candidate_idx].second;
+      if (alpha * dist_starprime <= dist_pprime) {
+        accept = false;
+        break;
+      }
+    }
+    if (accept)
+      new_nbhs.push_back(p_prime);
+
+    // Cycle to the next chunk.
+    current_chunk = (current_chunk + 1) % num_chunks;
+  }
+
+  auto new_neighbors_seq = parlay::to_sequence(new_nbhs);
+  return std::make_pair(new_neighbors_seq, distance_comps);
+}
+
 
   // Prune using distance matrix. This is specialized code only called
   // in the "all-prune" case and does not handle add/remove_dups, like
@@ -208,6 +291,7 @@ struct knn_index {
   std::pair<parlay::sequence<indexType>, long>
   FastPruneDistMat(indexType p, std::vector<pid>& candidates, distanceType *dist_mat,
                      PR &Points, double alpha) {
+    distanceType alpha_cast = static_cast<distanceType>(alpha);
     // add out neighbors of p to the candidate set.
     long distance_comps = 0;
     size_t N = Points.size();
@@ -238,7 +322,7 @@ struct knn_index {
         distance_comps++;
         distanceType dist_starprime =  dist_mat[p_prime*N + p_star];
         distanceType dist_pprime = candidates[candidate_idx].second;
-        if (alpha * dist_starprime <= dist_pprime) {
+        if (alpha_cast * dist_starprime <= dist_pprime) {
           add = false;
           break;
         }
@@ -346,6 +430,23 @@ struct knn_index {
       cc.push_back(std::make_pair(candidates[i], Points[candidates[i]].distance(Points[p])));
     }
     auto [ngh_seq, dc] = robustPrune(p, cc, G, Points, alpha, add);
+    return std::pair(ngh_seq, dc + distance_comps);
+  }
+
+  //wrapper to allow calling robustPrune on a sequence of candidates
+  //that do not come with precomputed distances (with chunking)
+  std::pair<parlay::sequence<indexType>, long>
+  robustPruneChunk(indexType p, parlay::sequence<indexType> candidates,
+              GraphI &G, PR &Points, double alpha, bool add = true){
+
+    parlay::sequence<pid> cc;
+    long distance_comps = 0;
+    cc.reserve(candidates.size()); // + size_of(p->out_nbh));
+    for (size_t i=0; i<candidates.size(); ++i) {
+      distance_comps++;
+      cc.push_back(std::make_pair(candidates[i], Points[candidates[i]].distance(Points[p])));
+    }
+    auto [ngh_seq, dc] = robustPruneChunk(p, cc, G, Points, alpha, add);
     return std::pair(ngh_seq, dc + distance_comps);
   }
 
@@ -485,6 +586,28 @@ struct knn_index {
       }
     }
   }
+
+
+
+void nn_prune_index(GraphI &G,size_t source, PR &Points, QPR &QPoints,
+    stats<indexType> &BuildStats, bool sort_neighbors = true, bool print = true) {
+  set_start();
+  parlay::sequence<pid> cc;
+  cc.reserve(Points.size()); // + size_of(p->out_nbh));
+  for (size_t j=0; j<Points.size(); ++j) {
+    cc.push_back(std::make_pair(j, Points[j].distance(Points[source])));
+  }
+  auto [neighbors, distance_comps] = robustPruneChunk(source, cc, G, Points, BP.alpha, true, true);
+  //auto [neighbors, distance_comps] = robustPrune(source, cc, G, Points, BP.alpha, true, true);
+  G[source].update_neighbors(neighbors);
+  
+
+  if (sort_neighbors) {
+    auto less = [&] (indexType j, indexType k) {
+      return Points[source].distance(Points[j]) < Points[source].distance(Points[k]);};
+    G[source].sort(less);
+  }
+}
 
   void sequential_insert(indexType point, indexType start_point, GraphI& G, PR& Points, QPR& QPoints,
                          stats<indexType>& BuildStats, double alpha) {

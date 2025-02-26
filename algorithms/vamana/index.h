@@ -150,7 +150,7 @@ struct knn_index {
 
   std::pair<parlay::sequence<indexType>, long>
   randomPrune(indexType p, parlay::sequence<pid>& cand,
-              GraphI &G, PR &Points, double alpha, bool add = true, bool rem_dup = true) {
+              GraphI &G, PR &Points, double alpha, parlay::random_generator &gen, bool add = true, bool rem_dup = true) {
     // add out neighbors of p to the candidate set.
     size_t out_size = G[p].size();
     std::vector<pid> candidates;
@@ -206,8 +206,14 @@ struct knn_index {
         }
       }
       
-      int r = rand() % pruned_cands.size();
-      new_nbhs.push_back(pruned_cands[r]);
+      if (new_nbhs.size() < BP.R / 4) {
+        new_nbhs.push_back(p_star);
+      }
+      else {
+        auto dis = std::uniform_int_distribution<int>(0, pruned_cands.size() - 1);
+        int r = dis(gen);
+        new_nbhs.push_back(pruned_cands[r]);
+      }
     }
 
     auto new_neighbors_seq = parlay::to_sequence(new_nbhs);
@@ -216,7 +222,7 @@ struct knn_index {
 
   std::pair<parlay::sequence<indexType>, long>
   randomPrune(indexType p, parlay::sequence<indexType> candidates,
-              GraphI &G, PR &Points, double alpha, bool add = true){
+              GraphI &G, PR &Points, double alpha, parlay::random_generator &gen, bool add = true){
     parlay::sequence<pid> cc;
     long distance_comps = 0;
     cc.reserve(candidates.size());
@@ -224,7 +230,7 @@ struct knn_index {
       distance_comps++;
       cc.push_back(std::make_pair(candidates[i], Points[candidates[i]].distance(Points[p])));
     }
-    auto [ngh_seq, dc] = randomPrune(p, cc, G, Points, alpha, add);
+    auto [ngh_seq, dc] = randomPrune(p, cc, G, Points, alpha, gen, add);
     return std::pair(ngh_seq, dc + distance_comps);
   }
 
@@ -503,6 +509,7 @@ struct knn_index {
       // robustPrune with the visited list as its candidate set
       t_beam.start();
 
+      parlay::random_generator gen;
       parlay::parallel_for(floor, ceiling, [&](size_t i) {
         size_t index = shuffled_inserts[i];
         int sp = BP.single_batch ? i : start_point;
@@ -520,9 +527,10 @@ struct knn_index {
         BuildStats.increment_visited(index, visited.size());
 
         long rp_distance_comps;
+        auto r = gen[i];
         std::tie(new_out_[i-floor], rp_distance_comps) = 
         #if RANDOM_PRUNE
-          randomPrune(index, visited, G, Points, alpha);
+          randomPrune(index, visited, G, Points, alpha, r);
         #else
           robustPrune(index, visited, G, Points, alpha);
         #endif
@@ -557,9 +565,10 @@ struct knn_index {
 	  add_neighbors_without_repeats(G[index], candidates);
 	  G[index].update_neighbors(candidates);
         } else {
+          auto r = gen[j];
           auto [new_out_2_, distance_comps] = 
           #if RANDOM_PRUNE
-            randomPrune(index, std::move(candidates), G, Points, alpha);
+            randomPrune(index, std::move(candidates), G, Points, alpha, r);
           #else
             robustPrune(index, std::move(candidates), G, Points, alpha);
           #endif

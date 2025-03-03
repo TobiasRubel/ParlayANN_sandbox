@@ -67,7 +67,8 @@ int main(int argc, char *argv[]) {
 
     using index_t = uint32_t;
     using value_t = float;
-    using PointType = parlayANN::Euclidian_Point<value_t>;
+    //using PointType = parlayANN::Euclidian_Point<value_t>;
+    using PointType = parlayANN::Mips_Point<value_t>;
     using PointRangeType = parlayANN::PointRange<PointType>;
 
     PointRangeType points;

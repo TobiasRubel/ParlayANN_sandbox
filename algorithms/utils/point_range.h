@@ -91,7 +91,7 @@ struct PointRange{
   template <typename PR>
   PointRange (PR& pr, int dims) : PointRange(pr, Point::generate_parameters(dims)) { }
 
-  PointRange(char* filename) : values(std::shared_ptr<byte[]>(nullptr, std::free)){
+  PointRange(char* filename, size_t sample_size = -1ULL) : values(std::shared_ptr<byte[]>(nullptr, std::free)){
       if(filename == NULL) {
         n = 0;
         return;
@@ -106,7 +106,7 @@ struct PointRange{
       unsigned int num_points;
       unsigned int d;
       reader.read((char*)(&num_points), sizeof(unsigned int));
-      n = num_points;
+      n = std::min<size_t>(num_points, sample_size);
       reader.read((char*)(&d), sizeof(unsigned int));
       params = parameters(d);
       std::cout << "Data: detected " << num_points << " points with dimension " << d << std::endl;

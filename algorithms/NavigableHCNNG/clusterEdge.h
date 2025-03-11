@@ -36,6 +36,7 @@
 #include "../utils/types.h"
 #include "../vamana/index.h"
 #include "hcnng_utils.h"
+#include "beam_hcnng.h"
 #include "parlay/parallel.h"
 #include "parlay/primitives.h"
 #include "parlay/random.h"
@@ -455,9 +456,13 @@ struct cluster {
   void multiple_clustertrees(GraphI &G, PR &Points, long cluster_size,
                              long num_clusters) {
     for (long i = 0; i < num_clusters; i++) {
-      if (MULTI_PIVOT) {
+      if (BEAM_HCNNG) {
+        beam_clusters_vamana(G, Points, 100, 1000, 1);
+      }
+      else if (MULTI_PIVOT) {
         recursively_sketch_wrapper(G, Points, cluster_size);
-      } else {
+      }
+      else {
         // random_clustering_wrapper(G, Points, cluster_size);
         double t = (double)i / (num_clusters - 1);
         // size_t num_leaders = num_clusters > 1
@@ -640,6 +645,7 @@ struct cluster {
   int FANOUT = 1;
   // Set to true to do k-way pivoting
   bool MULTI_PIVOT = false;
+  bool BEAM_HCNNG = false;
   double ALPHA = 1;
   std::string LEAF_ALG = "VamanaLeaf";
 

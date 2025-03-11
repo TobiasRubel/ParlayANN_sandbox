@@ -114,12 +114,13 @@ struct hcnng_index {
   }
 
   void build_index(GraphI &G, PR &Points, long cluster_rounds,
-                   long cluster_size, long MSTDeg, bool multi_pivot, bool prune, bool prune_all, double alpha,
+                   long cluster_size, long MSTDeg, bool multi_pivot, bool prune, bool prune_all, bool beam_hcnng, double alpha,
                    std::string leaf_method, long prune_degree, bool vamana_long_range, double top_level_pct, long top_level_leaders, int fanout) {
     cluster<Point, PointRange, indexType> C;
     C.START_POINTS.push_back(0);
     C.MST_DEG = MSTDeg;
     C.MULTI_PIVOT = multi_pivot;
+    C.BEAM_HCNNG = beam_hcnng;
     C.ALPHA = alpha;
     C.MAX_CLUSTER_SIZE=cluster_size;
     C.MAX_MERGED_CLUSTER_SIZE=cluster_size;

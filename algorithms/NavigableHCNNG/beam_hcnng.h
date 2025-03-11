@@ -22,8 +22,40 @@ struct alignas(64) PaddedMutex {
     std::mutex m;
 };
 
+template <typename index_t, typename Range, typename DistanceFunc>
+parlay::sequence<index_t> generic_prune(Range &candidates, index_t id, size_t max_degree, double alpha, DistanceFunc dist) {
+    parlay::sequence<index_t> pruned_indices;
+    pruned_indices.reserve(max_degree);
+    for (size_t i = 0; i < candidates.size() && pruned_indices.size() < max_degree; i++) {
+        bool add = true;
+        for (size_t j = 0; j < pruned_indices.size(); j++) {
+            if (alpha * dist(pruned_indices[j], candidates[i]) < dist(id, candidates[i])) {
+                add = false;
+                break;
+            }
+        }
+        if (add) pruned_indices.push_back(candidates[i]);
+    }
+    return pruned_indices;
+}
+
+template <typename index_t, typename Range, typename DistanceFunc>
+void generic_prune(parlay::sequence<index_t> adjlist, Range &candidates, index_t id, size_t max_degree, double alpha, DistanceFunc dist) {
+    adjlist.reserve(max_degree);
+    for (size_t i = 0; i < candidates.size() && adjlist.size() < max_degree; i++) {
+        bool add = true;
+        for (size_t j = 0; j < adjlist.size(); j++) {
+            if (alpha * dist(adjlist[j], candidates[i]) < dist(id, candidates[i])) {
+                add = false;
+                break;
+            }
+        }
+        if (add) adjlist.push_back(candidates[i]);
+    }
+}
+
 template <typename index_t, typename PointRangeType>
-parlay::sequence<parlay::sequence<index_t>> cluster_prune(PointRangeType &points, parlay::sequence<index_t> &ids, size_t max_degree) {
+parlay::sequence<parlay::sequence<index_t>> cluster_prune(PointRangeType &points, parlay::sequence<index_t> &ids, size_t max_degree, double alpha) {
     using value_t = typename PointRangeType::Point::distanceType;
 
     // Compute the distance matrix
@@ -45,20 +77,10 @@ parlay::sequence<parlay::sequence<index_t>> cluster_prune(PointRangeType &points
         }
         std::sort(candidates.begin(), candidates.end(), [&] (index_t a, index_t b) { return distances[i * ids.size() + a] < distances[i * ids.size() + b]; });
         
-        parlay::sequence<index_t> pruned_indices;
-        pruned_indices.reserve(max_degree);
-        for (size_t j = 0; j < max_degree && j < candidates.size(); j++) {
-            index_t candidate = candidates[j];
-            bool add = true;
-            for (size_t k = 0; k < pruned_indices.size(); k++) {
-                value_t dist = distances[i * ids.size() + candidate];
-                if (dist < distances[i * ids.size() + pruned_indices[k]]) {
-                    add = false;
-                    break;
-                }
-            }
-            if (add) pruned_indices.push_back(candidate);
-        }
+        parlay::sequence<index_t> pruned_indices = generic_prune(
+            candidates, i, max_degree, alpha,
+            [&] (index_t a, index_t b) { return distances[a * ids.size() + b]; }
+        );
 
         neighbors[i].reserve(pruned_indices.size());
         for (size_t j = 0; j < pruned_indices.size(); j++) {
@@ -126,7 +148,7 @@ void beam_clusters_vamana(GraphType &graph, PointRangeType &points, size_t targe
     std::vector<PaddedMutex> adjlist_locks(points.size());
     parlay::sequence<parlay::sequence<index_t>> neighbors(points.size());
     parlay::parallel_for(0, leader_ids.size(), [&] (size_t i) {
-        auto cluster_neighbors = cluster_prune(points, clusters[i], cluster_max_degree);
+        auto cluster_neighbors = cluster_prune(points, clusters[i], cluster_max_degree, alpha);
         for (size_t j = 0; j < clusters[i].size(); j++) {
             index_t point = clusters[i][j];
             std::lock_guard<std::mutex> lock(adjlist_locks[point].m);
@@ -140,22 +162,13 @@ void beam_clusters_vamana(GraphType &graph, PointRangeType &points, size_t targe
     std::uniform_int_distribution<index_t> dis(0, std::numeric_limits<index_t>::max());
     parlay::parallel_for(0, points.size(), [&] (size_t i) {
         auto r = gen[i];
-        neighbors[i].reserve(graph.max_degree());
-        for (size_t j = fanout; j < graph.max_degree() && j < beams[i].size(); j++) {
-            index_t leader_id = beams[i][j];
-            index_t candidate = clusters[leader_id][dis(r) % clusters[leader_id].size()];
-
-            value_t dist_to_point = points[i].distance(points[candidate]);
-            bool add = true;
-            for (size_t k = 0; k < neighbors[i].size(); k++) {
-                value_t dist_to_neighbor = points[i].distance(points[neighbors[i][k]]);
-                if (dist_to_point < dist_to_neighbor) {
-                    add = false;
-                    break;
-                }
-            }
-            if (add) neighbors[i].push_back(candidate);
-        }
+        auto candidates = parlay::delayed_tabulate<index_t>(beams[i].size(),
+            [&] (size_t j) { return clusters[beams[i][j]][dis(r) % clusters[beams[i][j]].size()]; }
+        );
+        generic_prune(
+            neighbors[i], candidates, i, graph.max_degree(), alpha,
+            [&] (index_t a, index_t b) { return points[a].distance(points[b]); }
+        );
     }, 1);
     std::cout << "Pruned " << graph.max_degree() - cluster_max_degree << " candidates from beam in " << timer.next_time() << " seconds" << std::endl;
 

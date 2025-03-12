@@ -40,7 +40,7 @@ parlay::sequence<index_t> generic_prune(Range &candidates, index_t id, size_t ma
 }
 
 template <typename index_t, typename Range, typename DistanceFunc>
-void generic_prune(parlay::sequence<index_t> adjlist, Range &candidates, index_t id, size_t max_degree, double alpha, DistanceFunc dist) {
+void generic_prune_add(parlay::sequence<index_t> adjlist, Range &candidates, index_t id, size_t max_degree, double alpha, DistanceFunc dist) {
     adjlist.reserve(max_degree);
     for (size_t i = 0; i < candidates.size() && adjlist.size() < max_degree; i++) {
         bool add = true;
@@ -78,7 +78,7 @@ parlay::sequence<parlay::sequence<index_t>> cluster_prune(PointRangeType &points
         std::sort(candidates.begin(), candidates.end(), [&] (index_t a, index_t b) { return distances[i * ids.size() + a] < distances[i * ids.size() + b]; });
         
         parlay::sequence<index_t> pruned_indices = generic_prune(
-            candidates, i, max_degree, alpha,
+            candidates, (index_t)i, max_degree, alpha,
             [&] (index_t a, index_t b) { return distances[a * ids.size() + b]; }
         );
 
@@ -165,8 +165,8 @@ void beam_clusters_vamana(GraphType &graph, PointRangeType &points, size_t targe
         auto candidates = parlay::delayed_tabulate<index_t>(beams[i].size(),
             [&] (size_t j) { return clusters[beams[i][j]][dis(r) % clusters[beams[i][j]].size()]; }
         );
-        generic_prune(
-            neighbors[i], candidates, i, graph.max_degree(), alpha,
+        generic_prune_add(
+            neighbors[i], candidates, (index_t)i, graph.max_degree(), alpha,
             [&] (index_t a, index_t b) { return points[a].distance(points[b]); }
         );
     }, 1);

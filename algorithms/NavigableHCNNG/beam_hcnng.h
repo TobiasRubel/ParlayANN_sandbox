@@ -40,7 +40,7 @@ parlay::sequence<index_t> generic_prune(Range &candidates, index_t id, size_t ma
 }
 
 template <typename index_t, typename Range, typename DistanceFunc>
-void generic_prune_add(parlay::sequence<index_t> adjlist, Range &candidates, index_t id, size_t max_degree, double alpha, DistanceFunc dist) {
+void generic_prune_add(parlay::sequence<index_t> &adjlist, Range &candidates, index_t id, size_t max_degree, double alpha, DistanceFunc dist) {
     adjlist.reserve(max_degree);
     for (size_t i = 0; i < candidates.size() && adjlist.size() < max_degree; i++) {
         bool add = true;
@@ -144,7 +144,7 @@ void beam_clusters_vamana(GraphType &graph, PointRangeType &points, size_t targe
     std::cout << "Clusters computed in " << timer.next_time() << " seconds" << std::endl;
 
     // Perform pruning within each cluster
-    size_t cluster_max_degree = graph.max_degree() / 8;
+    size_t cluster_max_degree = graph.max_degree() / 2;
     std::vector<PaddedMutex> adjlist_locks(points.size());
     parlay::sequence<parlay::sequence<index_t>> neighbors(points.size());
     parlay::parallel_for(0, leader_ids.size(), [&] (size_t i) {
@@ -171,6 +171,8 @@ void beam_clusters_vamana(GraphType &graph, PointRangeType &points, size_t targe
         );
     }, 1);
     std::cout << "Pruned " << graph.max_degree() - cluster_max_degree << " candidates from beam in " << timer.next_time() << " seconds" << std::endl;
+    std::cout << "Avg degree: " << parlay::reduce(parlay::map(neighbors, [] (const auto& n) { return n.size(); }), parlay::addm<size_t>()) / (double)points.size() << std::endl;
+    std::cout << "Max degree: " << parlay::reduce(parlay::map(neighbors, [] (const auto& n) { return n.size(); }), parlay::maxm<size_t>()) << std::endl;
 
     // Update the graph
     auto edges = parlay::flatten(

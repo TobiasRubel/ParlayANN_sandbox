@@ -175,9 +175,34 @@ void beam_clusters_vamana(GraphType &graph, PointRangeType &points, size_t targe
             neighbors[i], candidates, (index_t)i, graph.max_degree(), alpha,
             [&] (index_t a, index_t b) { return points[a].distance(points[b]); }
         );
-    }, 1);
+    });
     std::cout << "Pruned " << graph.max_degree() - cluster_max_degree << " candidates from beam in " << timer.next_time() << " seconds" << std::endl;
     std::cout << "Avg candidates considered: " << parlay::reduce(parlay::map(beams, [] (const auto& b) { return b.size(); }), parlay::addm<size_t>()) / (double)points.size() * cands_per_beam_cluster << std::endl;
+    std::cout << "Avg degree: " << parlay::reduce(parlay::map(neighbors, [] (const auto& n) { return n.size(); }), parlay::addm<size_t>()) / (double)points.size() << std::endl;
+    std::cout << "Max degree: " << parlay::reduce(parlay::map(neighbors, [] (const auto& n) { return n.size(); }), parlay::maxm<size_t>()) << std::endl;
+
+    // Bidirectionalize the edges
+    auto adjlist_sizes = parlay::map(neighbors, [] (const auto& n) { return n.size(); });
+    parlay::parallel_for(0, points.size(), [&] (size_t i) {
+        for (size_t j = 0; j < adjlist_sizes[i]; j++) {
+            index_t neighbor = neighbors[i][j];
+            std::lock_guard<std::mutex> lock(adjlist_locks[neighbor].m);
+            neighbors[neighbor].push_back(i);
+        }
+    });
+    std::cout << "Added bidirectional candidates" << std::endl;
+    std::cout << "Avg degree: " << parlay::reduce(parlay::map(neighbors, [] (const auto& n) { return n.size(); }), parlay::addm<size_t>()) / (double)points.size() << std::endl;
+    std::cout << "Max degree: " << parlay::reduce(parlay::map(neighbors, [] (const auto& n) { return n.size(); }), parlay::maxm<size_t>()) << std::endl;
+    parlay::parallel_for(0, points.size(), [&] (size_t i) {
+        std::sort(neighbors[i].begin(), neighbors[i].end(), [&] (index_t a, index_t b) {
+            return points[a].distance(points[i]) < points[b].distance(points[i]);
+        });
+        neighbors[i] = generic_prune(
+            neighbors[i], (index_t)i, graph.max_degree(), alpha,
+            [&] (index_t a, index_t b) { return points[a].distance(points[b]); }
+        );
+    });
+    std::cout << "Bidirectionalized edges in " << timer.next_time() << " seconds" << std::endl;
     std::cout << "Avg degree: " << parlay::reduce(parlay::map(neighbors, [] (const auto& n) { return n.size(); }), parlay::addm<size_t>()) / (double)points.size() << std::endl;
     std::cout << "Max degree: " << parlay::reduce(parlay::map(neighbors, [] (const auto& n) { return n.size(); }), parlay::maxm<size_t>()) << std::endl;
 

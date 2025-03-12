@@ -144,7 +144,7 @@ void beam_clusters_vamana(GraphType &graph, PointRangeType &points, size_t targe
     std::cout << "Clusters computed in " << timer.next_time() << " seconds" << std::endl;
 
     // Perform pruning within each cluster
-    size_t cluster_max_degree = graph.max_degree() / 2;
+    size_t cluster_max_degree = graph.max_degree() * 3 / 4;
     std::vector<PaddedMutex> adjlist_locks(points.size());
     parlay::sequence<parlay::sequence<index_t>> neighbors(points.size());
     parlay::parallel_for(0, leader_ids.size(), [&] (size_t i) {
@@ -156,14 +156,20 @@ void beam_clusters_vamana(GraphType &graph, PointRangeType &points, size_t targe
         }
     }, 1);
     std::cout << "Pruned " << cluster_max_degree << " candidates from clusters in " << timer.next_time() << " seconds" << std::endl;
+    std::cout << "Avg degree: " << parlay::reduce(parlay::map(neighbors, [] (const auto& n) { return n.size(); }), parlay::addm<size_t>()) / (double)points.size() << std::endl;
+    std::cout << "Max degree: " << parlay::reduce(parlay::map(neighbors, [] (const auto& n) { return n.size(); }), parlay::maxm<size_t>()) << std::endl;
 
     // Add candidates from beam and prune
+    static constexpr size_t cands_per_beam_cluster = 3;
     parlay::random_generator gen;
     std::uniform_int_distribution<index_t> dis(0, std::numeric_limits<index_t>::max());
     parlay::parallel_for(0, points.size(), [&] (size_t i) {
         auto r = gen[i];
-        auto candidates = parlay::delayed_tabulate<index_t>(beams[i].size(),
-            [&] (size_t j) { return clusters[beams[i][j]][dis(r) % clusters[beams[i][j]].size()]; }
+        auto candidates = parlay::delayed_tabulate<index_t>(beams[i].size() * cands_per_beam_cluster,
+            [&] (size_t j) {
+                auto leader_id = beams[i][j / cands_per_beam_cluster];
+                return clusters[leader_id][dis(r) % clusters[leader_id].size()];
+            }
         );
         generic_prune_add(
             neighbors[i], candidates, (index_t)i, graph.max_degree(), alpha,
@@ -171,6 +177,7 @@ void beam_clusters_vamana(GraphType &graph, PointRangeType &points, size_t targe
         );
     }, 1);
     std::cout << "Pruned " << graph.max_degree() - cluster_max_degree << " candidates from beam in " << timer.next_time() << " seconds" << std::endl;
+    std::cout << "Avg candidates considered: " << parlay::reduce(parlay::map(beams, [] (const auto& b) { return b.size(); }), parlay::addm<size_t>()) / (double)points.size() * cands_per_beam_cluster << std::endl;
     std::cout << "Avg degree: " << parlay::reduce(parlay::map(neighbors, [] (const auto& n) { return n.size(); }), parlay::addm<size_t>()) / (double)points.size() << std::endl;
     std::cout << "Max degree: " << parlay::reduce(parlay::map(neighbors, [] (const auto& n) { return n.size(); }), parlay::maxm<size_t>()) << std::endl;
 

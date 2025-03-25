@@ -539,9 +539,11 @@ struct cluster {
     auto edges = distmat_quadprune(active_indices, Points, BP);
     utils::process_edges(G, std::move(edges));
 
-    lock.lock();
-    START_POINTS.push_back(active_indices[0]);
-    lock.unlock();
+    if (active_indices.size() > 0) {
+      lock.lock();
+      START_POINTS.push_back(active_indices[0]);
+      lock.unlock();
+    }
 
     leaf_count++;
   }

@@ -345,10 +345,9 @@ struct cluster {
 
       parlay::parallel_for(0, ids.size(), [&](size_t i) {
         uint32_t point_id = ids[i];
-        auto cl =
-            ClosestLeaders(Points, leader_points, point_id, fanout).Take();
+        auto cl = closest_leaders(Points, leader_points, point_id, fanout);
         for (int j = 0; j < fanout; ++j) {
-          flat[i * fanout + j] = std::make_pair(cl[j].second, point_id);
+          flat[i * fanout + j] = std::make_pair(cl[j].first, point_id);
         }
       });
 

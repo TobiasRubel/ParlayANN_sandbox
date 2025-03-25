@@ -357,24 +357,35 @@ struct cluster {
         clusters.begin(), clusters.end(),
         [&](const auto &b1, const auto &b2) { return b1.size() > b2.size(); });
     // Merge
-    size_t iter = 0;
-    while (!clusters.empty() && clusters.back().size() < MIN_CLUSTER_SIZE) {
-      if (buckets.empty() || clusters.back().size() + buckets.back().size() >
-                                 MAX_MERGED_CLUSTER_SIZE) {
-        buckets.emplace_back();
+
+    while (clusters.size() > 1 && clusters.back().size() < MIN_CLUSTER_SIZE) {
+      int num_to_merge = 1;
+      int merged_size = clusters.back().size();
+      while (merged_size < MIN_CLUSTER_SIZE && clusters.size() > num_to_merge) {
+        if (merged_size + clusters[clusters.size() - num_to_merge - 1].size() >
+            MAX_MERGED_CLUSTER_SIZE) {
+          break;
+        }
+        merged_size += clusters[clusters.size() - num_to_merge - 1].size();
+        num_to_merge++;
       }
-      // merge small clusters together -- and already store them in the return
-      // buckets this will add some stupid long range edges. but hopefully this
-      // is better than having some isolated nodes. another fix could be to do a
-      // brute-force comparison with all points in the bucket one recursion
-      // level higher Caveat --> we have to hold the data structures for the
-      // graph already
-      for (const auto id : clusters.back()) {
-        buckets.back().push_back(id);
+      if (num_to_merge > 1) {
+        buckets.push_back(parlay::sequence<uint32_t>::uninitialized(merged_size));
+        auto &new_bucket = buckets.back();
+        size_t start = 0;
+        for (int i = 0; i < num_to_merge; i++) {
+          std::memcpy(new_bucket.begin() + start,
+                      clusters.back().begin(),
+                      clusters.back().size() * sizeof(uint32_t));
+          start += clusters.back().size();
+          clusters.pop_back();
+        }
+      } 
+      else {
+        buckets.push_back(std::move(clusters.back()));
+        clusters.pop_back();
       }
-      clusters.pop_back();
     }
-    //		std::cout << "Done merging" << std::endl;
 
     // recurse on clusters
     parlay::sequence<std::vector<Bucket>> rec_buckets(clusters.size());

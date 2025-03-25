@@ -334,30 +334,18 @@ struct cluster {
     //		std::cout << "after sampling: leaders size " << leaders.size()
     //<< std::endl;
     auto leader_points = PointRange(Points, leaders);
-    std::vector<Bucket> clusters(leaders.size());
-    //		std::cout << "Computing clusters" << std::endl;
 
     parlay::internal::timer t;
     t.start();
-    {  // less readable than map + zip + flatten, but at least it's as efficient
-       // as possible for fanout = 1
-      parlay::sequence<std::pair<uint32_t, uint32_t>> flat(ids.size() * fanout);
-
-      parlay::parallel_for(0, ids.size(), [&](size_t i) {
-        uint32_t point_id = ids[i];
-        auto cl = closest_leaders(Points, leader_points, point_id, fanout);
-        for (int j = 0; j < fanout; ++j) {
-          flat[i * fanout + j] = std::make_pair(cl[j].first, point_id);
-        }
-      });
-
-      auto pclusters = parlay::group_by_index(flat, leaders.size());
-      // copy clusters from parlay::sequence to std::vector
-      parlay::parallel_for(0, pclusters.size(), [&](size_t i) {
-        clusters[i] = Bucket(pclusters[i].begin(), pclusters[i].end());
-      });
-    }
-    //		std::cout << "Assigned to closest leaders" << std::endl;
+    parlay::sequence<std::pair<uint32_t, uint32_t>> flat(ids.size() * fanout);
+    parlay::parallel_for(0, ids.size(), [&](size_t i) {
+      uint32_t point_id = ids[i];
+      auto cl = closest_leaders(Points, leader_points, point_id, fanout);
+      for (int j = 0; j < fanout; ++j) {
+        flat[i * fanout + j] = std::make_pair(cl[j].first, point_id);
+      }
+    });
+    parlay::sequence<Bucket> clusters = parlay::group_by_index(flat, leaders.size());
     if (depth == 0) {
       t.next("first level assign time");
     }

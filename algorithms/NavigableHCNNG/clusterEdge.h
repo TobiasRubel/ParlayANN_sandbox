@@ -282,6 +282,7 @@ for (size_t cid = 0; cid < clusters.size(); cid++) {
     return clusters;
   }
 
+
   auto PruneSLINK_wrapper(GraphI &G, PR &Points, size_t num_clusters, size_t cluster_size) {
     std::random_device rd;
     std::mt19937 rng(rd());
@@ -305,7 +306,7 @@ for (size_t cid = 0; cid < clusters.size(); cid++) {
   // Returns a collection of leaf buckets.
   std::vector<Bucket> RecursivelySketch(PR &Points, Bucket &ids,
                                         long cluster_size, int depth,
-                                        int fanout, size_t seed) {
+                                        int fanout, size_t seed, int pivot_strat) {
     if (ids.size() <= cluster_size) {
       return {ids};
     }
@@ -330,7 +331,42 @@ for (size_t cid = 0; cid < clusters.size(); cid++) {
     //std::endl;
     auto leader_points = PointRange(Points, leaders);
     std::vector<Bucket> clusters(leaders.size());
-    //		std::cout << "Computing clusters" << std::endl;
+
+    // this code for the fanout experiment where we modify fanout by depth
+    // using depth for now, but we should play around with this. 
+    auto local_fanout=fanout;
+    // if (pivot_strat == 2) {
+    //   auto fanout_sum = 1;
+    //   for (auto i = 0; i <= depth; i++) {
+    //     fanout_sum += std::pow(i, i);
+    //   }
+    //   if (fanout_sum <= fanout) {
+    //     local_fanout = std::min<int>(depth+1, (int) num_leaders);
+    //     //if (local_fanout == 0) local_fanout = 1;
+    //   } else {
+    //     local_fanout = 1;
+    //   }
+    //   //std::cout << "Depth: " << depth << " Local Fanout: " << local_fanout << " Num Leaders: " << num_leaders << std::endl;
+    // }
+    //define lookup table for local_fanout in terms of depth, assuming we have a max depth of around 4
+    if (pivot_strat == 2) {
+      // std::vector<int> fanout_lookup = {5, 3, 1, 1};
+      // if (depth < 4) {
+      //   local_fanout = std::min<int>(fanout_lookup[depth], (int) num_leaders);
+      // } else {
+      //   local_fanout = 1;
+      // }
+      local_fanout = std::min<int>(4-depth, (int) num_leaders);
+      if (local_fanout < 1) local_fanout = 1;
+      // local_fanout = std::min<int>(4-(3-depth), (int) num_leaders);
+      // if (local_fanout > 4) local_fanout = 1;
+    }
+
+    // for compatibility and ease of coding we're doing a switch of fanout to local fanout here, but if one of
+    // these experiments works then we'll be able to simplify the code... bear with me. 
+
+    auto old_fanout = fanout;
+    fanout = local_fanout;
 
 		parlay::internal::timer t;
 		t.start();
@@ -340,13 +376,61 @@ for (size_t cid = 0; cid < clusters.size(); cid++) {
 
       parlay::parallel_for(0, ids.size(), [&](size_t i) {
         uint32_t point_id = ids[i];
-        auto cl =
+        switch (pivot_strat) {
+          case 0:
+          {auto cl =
+          ClosestLeaders(Points, leader_points, point_id, fanout).Take();
+            for (int j = 0; j < fanout; ++j) {
+              flat[i * fanout + j] = std::make_pair(cl[j].second, point_id);
+            }
+            break;
+          }
+          case 1:
+            {auto pl = PrunedLeaders(Points, leader_points, point_id, fanout, ALPHA).Take();
+            for (int j = 0; j < fanout; ++j) {
+              if (j < pl.size()) {
+                flat[i * fanout + j] = std::make_pair(pl[j].second, point_id);
+              } else {
+                flat[i * fanout + j] = std::make_pair(-1, point_id);
+              }
+            }
+            break;
+          }
+          case 2:
+          {auto cl =
             ClosestLeaders(Points, leader_points, point_id, fanout).Take();
-        for (int j = 0; j < fanout; ++j) {
-          flat[i * fanout + j] = std::make_pair(cl[j].second, point_id);
+              for (int j = 0; j < fanout; ++j) {
+                flat[i * fanout + j] = std::make_pair(cl[j].second, point_id);
+              }
+              break;
+          }
+  
+
+          // case 3:
+          // { 
+          //   auto cl = ClosestLeaders(Points, leader_points, point_id, fanout).Take();
+          //   auto prev_dist = cl[0].first;
+          //   for (int j = 0; j < fanout; ++j) {
+          //     auto curr_dist = cl[j].first;
+          //     if (BETA*prev_dist <= curr_dist) {
+          //       flat[i * fanout + j] = std::make_pair(cl[j].second, point_id);
+          //       prev_dist = curr_dist;
+          //     } else {
+          //       break;
+          //     }
+          //   }
+          //   break;
+          // }
+          default:
+            std::cout << "Unknown pivot strategy: " << pivot_strat << std::endl;
+            exit(0);
         }
       });
-
+      //filter out any that have -1 in the pair
+      if (pivot_strat == 1) {
+        flat = parlay::filter(flat, [&](auto p) { return p.first != -1; });
+      }
+      //std::cout << "Computed closest leaders" << std::endl;
       auto pclusters = parlay::group_by_index(flat, leaders.size());
       // copy clusters from parlay::sequence to std::vector
       parlay::parallel_for(0, pclusters.size(), [&](size_t i) {
@@ -357,6 +441,9 @@ for (size_t cid = 0; cid < clusters.size(); cid++) {
 		if (depth == 0) {
 			t.next("first level assign time");
 		}
+
+    // now adjust fanout based on cases
+    (pivot_strat == 2) ? fanout = old_fanout : fanout = 1;
 
     leaders.clear();
 
@@ -411,7 +498,7 @@ for (size_t cid = 0; cid < clusters.size(); cid++) {
             // The normal case
             recursive_buckets =
                 RecursivelySketch(Points, clusters[cluster_id], cluster_size,
-                                  depth + 1, /*fanout=*/1, next_seed + cluster_id);
+                                  depth + 1, fanout, next_seed + cluster_id, pivot_strat);
           }
           rec_buckets[cluster_id] = std::move(recursive_buckets);
         },
@@ -436,7 +523,7 @@ for (size_t cid = 0; cid < clusters.size(); cid++) {
     auto ids = parlay::tabulate(Points.size(), [&](uint32_t i) { return i; });
     parlay::internal::timer t;
     t.start();
-    auto buckets = RecursivelySketch(Points, ids, cluster_size, 0, FANOUT, SEED);
+    auto buckets = RecursivelySketch(Points, ids, cluster_size, 0, FANOUT, SEED, PIVOT_STRATEGY);
 		SEED = parlay::hash64(SEED);
     t.next("buckets time");
     std::cout << "Computed buckets!" << std::endl;
@@ -528,10 +615,10 @@ for (size_t cid = 0; cid < clusters.size(); cid++) {
     parlay::sequence<parlay::sequence<std::pair<indexType,indexType>>> bss(num_clusters);
     for (auto i = 0; i < num_clusters; i++) {
       auto ids = parlay::tabulate(Points.size(), [&](uint32_t i) { return i; });
-      auto buckets = RecursivelySketch(Points, ids, cluster_size, 0, FANOUT, SEED);
+      auto buckets = RecursivelySketch(Points, ids, cluster_size, 0, FANOUT, SEED, PIVOT_STRATEGY);
       SEED = parlay::hash64(SEED);
       std::cout << "processing bucket neighbors for replicate " << i << std::endl;
-      process_bucket_neighbors(Points, buckets, bss, i, 2*MST_DEG);
+      process_bucket_neighbors(Points, buckets, bss, i, 4*MST_DEG);
       t.next("buckets time");
     }
     // flatten bss and groupby
@@ -734,7 +821,7 @@ for (size_t cid = 0; cid < clusters.size(); cid++) {
   size_t SEED = 555;
   double FRACTION_LEADERS = 0.005;
   size_t TOP_LEVEL_NUM_LEADERS = 950;
-  size_t MAX_NUM_LEADERS = 1500;
+  size_t MAX_NUM_LEADERS = TOP_LEVEL_NUM_LEADERS;
   size_t MAX_CLUSTER_SIZE = 5000;
   size_t MIN_CLUSTER_SIZE = 500;
   size_t MAX_MERGED_CLUSTER_SIZE = 2500;
@@ -747,7 +834,7 @@ for (size_t cid = 0; cid < clusters.size(); cid++) {
   bool MULTI_PIVOT = false;
   double ALPHA = 1;
   std::string LEAF_ALG = "VamanaLeaf";
-
+  int PIVOT_STRATEGY = 0;
   // Horrible hacks. Fix.
   SpinLock lock;
   parlay::sequence<uint32_t> START_POINTS;

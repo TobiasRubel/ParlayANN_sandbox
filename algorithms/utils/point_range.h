@@ -57,7 +57,9 @@ struct PointRange{
     int num_bytes = p.num_bytes();
     aligned_bytes = (num_bytes <= 32) ? 32 : 64 * ((num_bytes - 1)/64 + 1);
     long total_bytes = n * aligned_bytes;
-    byte* ptr = (byte*) aligned_alloc(1l << 21, total_bytes);
+    constexpr size_t ALIGNMENT = 1L << 21;
+    total_bytes = (total_bytes + ALIGNMENT - 1) & ~(ALIGNMENT - 1);
+    byte* ptr = (byte*) aligned_alloc(ALIGNMENT, total_bytes);
     madvise(ptr, total_bytes, MADV_HUGEPAGE);
     values = std::shared_ptr<byte[]>(ptr, std::free);
     byte* vptr = values.get();
@@ -71,8 +73,10 @@ struct PointRange{
     n = indices.size();
     aligned_bytes = pr.aligned_bytes;
     long total_bytes = n * aligned_bytes;
-    byte* ptr = (byte*) aligned_alloc(1l << 21, total_bytes);
-    //madvise(ptr, total_bytes, MADV_HUGEPAGE);
+    constexpr size_t ALIGNMENT = 1L << 21;
+    total_bytes = (total_bytes + ALIGNMENT - 1) & ~(ALIGNMENT - 1);
+    byte* ptr = (byte*) aligned_alloc(ALIGNMENT, total_bytes);
+    madvise(ptr, total_bytes, MADV_HUGEPAGE);
     values = std::shared_ptr<byte[]>(ptr, std::free);
     byte* vptr = values.get();
     for (size_t i=0; i < indices.size(); ++i) {
@@ -111,7 +115,9 @@ struct PointRange{
       if (aligned_bytes != num_bytes)
         std::cout << "Aligning bytes to " << aligned_bytes << std::endl;
       long total_bytes = n * aligned_bytes;
-      byte* ptr = (byte*) aligned_alloc(1l << 21, total_bytes);
+      constexpr size_t ALIGNMENT = 1L << 21;
+      total_bytes = (total_bytes + ALIGNMENT - 1) & ~(ALIGNMENT - 1);
+      byte* ptr = (byte*) aligned_alloc(ALIGNMENT, total_bytes);
       madvise(ptr, total_bytes, MADV_HUGEPAGE);
       values = std::shared_ptr<byte[]>(ptr, std::free);
       size_t BLOCK_SIZE = 1000000;

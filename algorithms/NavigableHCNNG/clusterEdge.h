@@ -541,9 +541,8 @@ struct cluster {
       lock.lock();
       START_POINTS.push_back(active_indices[0]);
       lock.unlock();
+      leaf_count++;
     }
-
-    leaf_count++;
   }
 
   // parameters dim and K are just to interface with the cluster tree code

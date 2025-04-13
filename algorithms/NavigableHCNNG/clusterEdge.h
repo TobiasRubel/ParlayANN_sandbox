@@ -318,9 +318,6 @@ struct cluster {
     // sample leaders
     size_t num_leaders =
         (depth == 0) ? TOP_LEVEL_NUM_LEADERS : ids.size() * FRACTION_LEADERS;
-    // if (depth < 5 && TOP_LEVEL_NUM_LEADERS < num_leaders) {
-    //   num_leaders = TOP_LEVEL_NUM_LEADERS;
-    // }
     num_leaders = std::min<size_t>(num_leaders, MAX_NUM_LEADERS);
     num_leaders = std::max<size_t>(num_leaders, 3);
     lock.lock();
@@ -334,6 +331,8 @@ struct cluster {
     //		std::cout << "after sampling: leaders size " << leaders.size()
     //<< std::endl;
     auto leader_points = PointRange(Points, leaders);
+
+
 
     parlay::internal::timer t;
     t.start();
@@ -438,6 +437,12 @@ struct cluster {
     parlay::random rnd(uni(rng));
     auto ids = parlay::tabulate(Points.size(), [&](uint32_t i) { return i; });
     parlay::internal::timer t;
+
+    // int pivot_strat = 0;
+    // auto local_fanout = FANOUT;
+    // if (pivot_strat != 0) {
+    // } 
+    
     t.start();
     auto buckets =
         RecursivelySketch(Points, ids, cluster_size, 0, FANOUT, SEED);
@@ -641,6 +646,9 @@ struct cluster {
   bool MULTI_PIVOT = false;
   double ALPHA = 1;
   std::string LEAF_ALG = "VamanaLeaf";
+
+  // 0 = all at the top level; 1 = n, n -1, ... 1 
+  int PIVOT_STRAT = 0;
 
   // Horrible hacks. Fix.
   SpinLock lock;

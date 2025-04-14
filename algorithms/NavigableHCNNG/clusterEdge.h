@@ -310,7 +310,7 @@ struct cluster {
   // Returns a collection of leaf buckets.
   std::vector<Bucket> RecursivelySketch(PR &Points, Bucket &ids,
                                         long cluster_size, int depth,
-                                        int fanout, size_t seed) {
+                                        int fanout, size_t seed, int fanout_levels) {
     if (ids.size() <= cluster_size) {
       return {ids};
     }
@@ -358,33 +358,39 @@ struct cluster {
     // Merge
 
     while (clusters.size() > 1 && clusters.back().size() < MIN_CLUSTER_SIZE) {
-      int num_to_merge = 1;
-      int merged_size = clusters.back().size();
-      while (merged_size < MIN_CLUSTER_SIZE && clusters.size() > num_to_merge) {
-        if (merged_size + clusters[clusters.size() - num_to_merge - 1].size() >
-            MAX_MERGED_CLUSTER_SIZE) {
-          break;
-        }
+      size_t num_to_merge = 1;
+      size_t merged_size = clusters.back().size();
+      // Try to merge additional clusters from the end without exceeding MAX_MERGED_CLUSTER_SIZE.
+      while (num_to_merge < clusters.size() &&
+            merged_size < MIN_CLUSTER_SIZE &&
+            merged_size + clusters[clusters.size() - num_to_merge - 1].size() <= MAX_MERGED_CLUSTER_SIZE) {
         merged_size += clusters[clusters.size() - num_to_merge - 1].size();
         num_to_merge++;
       }
-      if (num_to_merge > 1) {
-        buckets.push_back(parlay::sequence<uint32_t>::uninitialized(merged_size));
-        auto &new_bucket = buckets.back();
-        size_t start = 0;
-        for (int i = 0; i < num_to_merge; i++) {
-          std::memcpy(new_bucket.begin() + start,
-                      clusters.back().begin(),
-                      clusters.back().size() * sizeof(uint32_t));
-          start += clusters.back().size();
-          clusters.pop_back();
-        }
-      } 
-      else {
-        buckets.push_back(std::move(clusters.back()));
+      
+      // Create a new bucket with the computed merged size.
+      auto new_bucket = parlay::sequence<uint32_t>::uninitialized(merged_size);
+      size_t pos = 0;
+      // Merge the last 'num_to_merge' clusters in order:
+      // Copy clusters from the index clusters.size() - num_to_merge up to clusters.size()-1.
+      for (size_t i = clusters.size() - num_to_merge; i < clusters.size(); i++) {
+        size_t cluster_size = clusters[i].size();
+        std::memcpy(new_bucket.begin() + pos,
+                    clusters[i].begin(),
+                    cluster_size * sizeof(uint32_t));
+        pos += cluster_size;
+      }
+      
+      // Remove the merged clusters from clusters.
+      for (size_t i = 0; i < num_to_merge; i++) {
         clusters.pop_back();
       }
+      //deduplicate the new bucket 
+      new_bucket = parlay::remove_duplicates(new_bucket);
+      
+      buckets.push_back(std::move(new_bucket));
     }
+
 
     // recurse on clusters
     parlay::sequence<std::vector<Bucket>> rec_buckets(clusters.size());
@@ -410,10 +416,12 @@ struct cluster {
               }
             }
           } else {
+            auto local_fanout = 1;
+            (depth < fanout_levels) ? local_fanout = fanout : local_fanout = 1;
             // The normal case
             recursive_buckets = RecursivelySketch(
                 Points, clusters[cluster_id], cluster_size, depth + 1,
-                /*fanout=*/1, next_seed + cluster_id);
+                /*fanout=*/local_fanout, next_seed + cluster_id, fanout_levels);
           }
           rec_buckets[cluster_id] = std::move(recursive_buckets);
         },
@@ -438,20 +446,36 @@ struct cluster {
     auto ids = parlay::tabulate(Points.size(), [&](uint32_t i) { return i; });
     parlay::internal::timer t;
 
-    // int pivot_strat = 0;
-    // auto local_fanout = FANOUT;
-    // if (pivot_strat != 0) {
-    // } 
-    
+    int fanout_per = FANOUT_PER_LEVEL;
+    int fanout_levels = 0;
+    auto local_fanout = FANOUT;
+    if (fanout_per != 0) {
+      // identify the number of levels to fanout at the per_level_fanout without exceeding fanout.
+      // we are using a constant rate of fanout, which may not be ideal. For power users, we may want to allow
+      // custom fanout distributions.
+      // there may also be some way of dynamically adjusting the fanout within the RecursivelySketch method based on
+      // distributional properties of the data. 
+      local_fanout = fanout_per;
+      int fprod = fanout_per;
+      while (fprod*fanout_per <= FANOUT) {
+        fprod *= fanout_per;
+        fanout_levels++;
+      }
+    } 
+    std::cout << "number of levels to fanout: " << fanout_levels + 1 << std::endl;
+    std::cout << "fanout per level: " << local_fanout << std::endl;
+    std::cout << "total fanout: " << std::pow(local_fanout,(fanout_levels+1)) << std::endl;
+    std::cout << "total fanout allowance: " << FANOUT << std::endl;
+
     t.start();
     auto buckets =
-        RecursivelySketch(Points, ids, cluster_size, 0, FANOUT, SEED);
+        RecursivelySketch(Points, ids, cluster_size, 0, local_fanout, SEED, fanout_levels);
     SEED = parlay::hash64(SEED);
     t.next("buckets time");
     std::cout << "Computed buckets!" << std::endl;
-    // Build on each bucket.
+    // Build on each bucket. // note the hack of checking size. This is a hack to get around the RecursivelySketch routine producing empty clusters... Looking into it.
     parlay::parallel_for(0, buckets.size(),
-                         [&](size_t i) { RunLeaf(G, Points, buckets[i]); });
+                         [&](size_t i) { if (buckets[i].size() > MIN_CLUSTER_SIZE) RunLeaf(G, Points, buckets[i]); });
     t.next("build leaf time");
   }
 
@@ -642,6 +666,7 @@ struct cluster {
   double TOO_SMALL_SHRINKAGE_FRACTION = 0.8;
   size_t MST_DEG = 3;
   int FANOUT = 1;
+  int FANOUT_PER_LEVEL = 1;
   // Set to true to do k-way pivoting
   bool MULTI_PIVOT = false;
   double ALPHA = 1;

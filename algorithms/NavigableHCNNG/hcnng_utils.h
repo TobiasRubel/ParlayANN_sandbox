@@ -203,10 +203,19 @@ auto run_quadprune_on_indices(Seq &seq, PR &all_points, BuildParams &BP, bool pa
 
 template <typename PR, typename Seq>
 auto distmat_quadprune(Seq &seq, PR &all_points, BuildParams &BP, bool parallel=true) {
-  // parlay::internal::timer t;
-  // std::cout << "Generating distance matrix" << std::endl;
-  // t.start();
   using indexType = uint32_t;
+  // auto ssize = seq.size();
+  // seq = parlay::remove_duplicates(seq);
+  // if (ssize != seq.size()) {
+  //   std::cout << "Error: duplicate points in the sequence." << std::endl;
+  //   exit(0);
+  // }
+  // ssize = seq.size();
+  // seq = parlay::filter(seq, [&](indexType i) { return i < all_points.size(); });
+  // if (ssize != seq.size()) {
+  //   std::cout << "Error: out of bounds points in the sequence." << std::endl;
+  //   //exit(0);
+  // }
   Graph<indexType> G(BP.R, seq.size());
 
   using edge = std::pair<uint32_t, uint32_t>;

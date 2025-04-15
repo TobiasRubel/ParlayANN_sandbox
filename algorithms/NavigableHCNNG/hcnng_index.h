@@ -123,6 +123,7 @@ struct hcnng_index {
     C.ALPHA = alpha;
     C.MAX_CLUSTER_SIZE=cluster_size;
     C.MAX_MERGED_CLUSTER_SIZE=cluster_size;
+    //C.MIN_CLUSTER_SIZE=cluster_size/10;
 		C.TOP_LEVEL_NUM_LEADERS = top_level_leaders;
     std::cout << "Set MSTDeg to: " << MSTDeg << " MultiPivot to: " << multi_pivot  << " fanout: " << fanout << std::endl;
     C.LEAF_ALG = leaf_method;

@@ -332,6 +332,7 @@ struct cluster {
     //<< std::endl;
     auto leader_points = PointRange(Points, leaders);
 
+    fanout = std::min<int>(fanout, (int) num_leaders);
 
 
     parlay::internal::timer t;

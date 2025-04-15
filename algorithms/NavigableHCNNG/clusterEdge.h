@@ -476,7 +476,7 @@ struct cluster {
     std::cout << "Computed buckets!" << std::endl;
     // Build on each bucket. // note the hack of checking size. This is a hack to get around the RecursivelySketch routine producing empty clusters... Looking into it.
     parlay::parallel_for(0, buckets.size(),
-                         [&](size_t i) { if (buckets[i].size() > MIN_CLUSTER_SIZE) RunLeaf(G, Points, buckets[i]); });
+                         [&](size_t i) { if (buckets[i].size() >= MIN_CLUSTER_SIZE) RunLeaf(G, Points, buckets[i]); });
     t.next("build leaf time");
   }
 

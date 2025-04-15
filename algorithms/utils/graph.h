@@ -134,10 +134,16 @@ struct Graph{
   void allocate_graph(long maxDeg, size_t n) {
     long cnt = n * (maxDeg + 1);
     long num_bytes = cnt * sizeof(indexType);
-    constexpr size_t ALIGNMENT = 1L << 21;
-    num_bytes = (num_bytes + ALIGNMENT - 1) & ~(ALIGNMENT - 1);
-    indexType* ptr = (indexType*) aligned_alloc(ALIGNMENT, num_bytes);
-    madvise(ptr, num_bytes, MADV_HUGEPAGE);
+    indexType* ptr;
+    if (num_bytes > 1 << 24) {
+      constexpr size_t ALIGNMENT = 1L << 21;
+      num_bytes = (num_bytes + ALIGNMENT - 1) & ~(ALIGNMENT - 1);
+      ptr = (indexType*) aligned_alloc(ALIGNMENT, num_bytes);
+      madvise(ptr, num_bytes, MADV_HUGEPAGE);
+    }
+    else {
+      ptr = (indexType*) malloc(num_bytes);
+    }
     parlay::parallel_for(0, cnt, [&] (long i) {ptr[i] = 0;});
     graph = std::shared_ptr<indexType[]>(ptr, std::free);
   }

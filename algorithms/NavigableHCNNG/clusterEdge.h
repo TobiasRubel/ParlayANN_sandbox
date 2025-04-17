@@ -537,11 +537,12 @@ struct cluster {
         run_vamana_on_indices(active_indices, Points, BP, /*parallel=*/true);
     utils::process_edges(G, std::move(edges));
 
-    lock.lock();
-    START_POINTS.push_back(active_indices[0]);
-    lock.unlock();
-
-    leaf_count++;
+    if (active_indices.size() > 0) {
+      lock.lock();
+      START_POINTS.push_back(active_indices[0]);
+      lock.unlock();
+      leaf_count++;
+    }
   }
 
   void QuadPrune(GraphI &G, PR &Points,
@@ -552,11 +553,12 @@ struct cluster {
     auto edges = run_quadprune_on_indices(active_indices, Points, BP);
     utils::process_edges(G, std::move(edges));
 
-    lock.lock();
-    START_POINTS.push_back(active_indices[0]);
-    lock.unlock();
-
-    leaf_count++;
+    if (active_indices.size() > 0) {
+      lock.lock();
+      START_POINTS.push_back(active_indices[0]);
+      lock.unlock();
+      leaf_count++;
+    }
   }
 
   void DistMatQuadPrune(GraphI &G, PR &Points,
@@ -577,15 +579,16 @@ struct cluster {
 
   // parameters dim and K are just to interface with the cluster tree code
   void MSTk(GraphI &G, PR &Points, parlay::sequence<uint32_t> &active_indices) {
-    lock.lock();
-    START_POINTS.push_back(active_indices[0]);
-
+    if (active_indices.size() > 0) {
+      lock.lock();
+      START_POINTS.push_back(active_indices[0]);
+      lock.unlock();
+    }
     double extra_fraction = 0.01;
 
     // std::mt19937 prng(parlay::hash64(active_indices[0]));
     // std::sample(active_indices.begin(), active_indices.end(),
     // leaders.begin(), leaders.size(), prng);
-    lock.unlock();
 
     // preprocessing for Kruskal's
     size_t N = active_indices.size();

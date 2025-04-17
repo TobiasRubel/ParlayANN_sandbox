@@ -243,6 +243,7 @@ struct knn_index {
     // add out neighbors of p to the candidate set.
     long distance_comps = 0;
     size_t N = Points.size();
+    float inverse_alpha = 1.0 / alpha;
 
     // Sort the candidate set according to distance from p
     auto less = [&](std::pair<indexType, distanceType> a, std::pair<indexType, distanceType> b) {
@@ -267,16 +268,16 @@ struct knn_index {
       // Check if p_prime is already pruned out based on what we have
       // added so far.
       bool add = true;
+      distanceType dist_pprime = candidates[candidate_idx].second * inverse_alpha;
       for (auto p_star : new_nbhs) {
         distance_comps++;
         distanceType dist_starprime =  dist_mat[p_prime*N + p_star];
-        distanceType dist_pprime = candidates[candidate_idx].second;
-        if (alpha * dist_starprime <= dist_pprime) {
+        if (dist_starprime <= dist_pprime) {
           add = false;
           break;
         }
       }
-      if (add)  new_nbhs.push_back(p_prime);
+      if (add) new_nbhs.push_back(p_prime);
       candidate_idx++;
     }
 

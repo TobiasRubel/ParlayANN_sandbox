@@ -396,9 +396,10 @@ struct knn_index {
     }
 	}
 
-  void distmat_robust_prune(GraphI &G, PR &Points, QPR &QPoints, distanceType *dist_mat,
-                   stats<indexType> &BuildStats, bool sort_neighbors = true, bool print = true) {
+  parlay::sequence<std::pair<uint32_t, uint32_t>> distmat_robust_prune(PR &Points, QPR &QPoints, distanceType *dist_mat, bool sort_neighbors = true, bool print = true) {
     set_start();
+    using edge = std::pair<uint32_t, uint32_t>;
+    parlay::sequence<edge> edges;
     for (size_t i=0; i < Points.size(); ++i) {
       std::vector<pid> cc;
       cc.reserve(Points.size()); // + size_of(p->out_nbh));
@@ -406,16 +407,11 @@ struct knn_index {
         cc.push_back(std::make_pair(j, dist_mat[i * Points.size() + j]));
       }
       auto [neighbors, distance_comps] = robustPruneDistMat(i, cc, dist_mat, Points, BP.alpha);
-      G[i].update_neighbors(neighbors);
-    }
-
-    if (sort_neighbors) {
-      for (size_t i=0; i<G.size(); ++i) {
-        auto less = [&] (indexType j, indexType k) {
-          return Points[i].distance(Points[j]) < Points[i].distance(Points[k]);};
-        G[i].sort(less);
+      for (auto nbhr : neighbors) {
+        edges.push_back(std::make_pair(i, nbhr));
       }
     }
+    return edges;
   }
 
   void sequential_insert(indexType point, indexType start_point, GraphI& G, PR& Points, QPR& QPoints,

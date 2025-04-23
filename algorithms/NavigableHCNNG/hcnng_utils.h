@@ -216,15 +216,15 @@ auto distmat_quadprune(Seq &seq, PR &all_points, BuildParams &BP, bool parallel=
   //   std::cout << "Error: out of bounds points in the sequence." << std::endl;
   //   //exit(0);
   // }
-  Graph<indexType> G(BP.R, seq.size());
+  //Graph<indexType> G(BP.R, seq.size());
 
   using edge = std::pair<uint32_t, uint32_t>;
-  parlay::sequence<edge> edges;
+  //parlay::sequence<edge> edges;
 
   PR points = PR(all_points, seq);
   using findex = knn_index<PR, PR, indexType>;
   findex I(BP);
-  stats<unsigned int> BuildStats(G.size());
+  //stats<unsigned int> BuildStats(G.size());
 
   using distanceType = typename PR::Point::distanceType;
   auto dist_mat = new distanceType[seq.size() * seq.size()];
@@ -246,15 +246,19 @@ auto distmat_quadprune(Seq &seq, PR &all_points, BuildParams &BP, bool parallel=
   }
   // std::cout << "Distance matrix generated: " << t.next_time() << std::endl;
 
-  I.distmat_robust_prune(G, points, points, dist_mat, BuildStats, true, false);
-  // std::cout << "Pruning done: " << t.next_time() << std::endl;
-  for (size_t i=0; i < G.size(); ++i) {
-    size_t our_ind = seq[i];
-    for (size_t j=0; j < G[i].size(); ++j) {
-      auto neighbor_ind = seq[G[i][j]];
-      edges.push_back(std::make_pair(our_ind, neighbor_ind));
-    }
+  auto edges = I.distmat_robust_prune(points, points, dist_mat, true, false);
+  //std::cout << "Pruning done: " << t.next_time() << std::endl;
+  for (auto i = 0; i < edges.size(); ++i) {
+    edges[i].first = seq[edges[i].first];
+    edges[i].second = seq[edges[i].second];
   }
+  // for (size_t i=0; i < G.size(); ++i) {
+  //   size_t our_ind = seq[i];
+  //   for (size_t j=0; j < G[i].size(); ++j) {
+  //     auto neighbor_ind = seq[G[i][j]];
+  //     edges.push_back(std::make_pair(our_ind, neighbor_ind));
+  //   }
+  // }
   delete[] dist_mat;
   return edges;
 }

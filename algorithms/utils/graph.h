@@ -32,6 +32,7 @@
 
 #include "parlay/parallel.h"
 #include "parlay/primitives.h"
+#include "parlay/alloc.h"
 #include "parlay/internal/file_map.h"
 
 #include "types.h"
@@ -140,12 +141,13 @@ struct Graph{
       num_bytes = (num_bytes + ALIGNMENT - 1) & ~(ALIGNMENT - 1);
       ptr = (indexType*) aligned_alloc(ALIGNMENT, num_bytes);
       madvise(ptr, num_bytes, MADV_HUGEPAGE);
+      graph = std::shared_ptr<indexType[]>(ptr, std::free);
     }
     else {
-      ptr = (indexType*) malloc(num_bytes);
+      ptr = (indexType*) parlay::p_malloc(num_bytes);
+      graph = std::shared_ptr<indexType[]>(ptr, parlay::p_free);
     }
     parlay::parallel_for(0, cnt, [&] (long i) {ptr[i] = 0;});
-    graph = std::shared_ptr<indexType[]>(ptr, std::free);
   }
 
   Graph(long maxDeg, size_t n) : maxDeg(maxDeg), n(n) {

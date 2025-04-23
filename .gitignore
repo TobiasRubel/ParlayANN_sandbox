@@ -13,4 +13,5 @@ output/
 *.csv
 *.fbin
 *.ibin
+*.log
 algorithms/scripts/*

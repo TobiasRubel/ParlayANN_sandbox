@@ -311,6 +311,7 @@ struct cluster {
   std::vector<Bucket> RecursivelySketch(PR &Points, Bucket &ids,
                                         long cluster_size, int depth,
                                         int fanout, size_t seed, int fanout_levels) {
+    int granularity = 5000;
     if (ids.size() <= cluster_size) {
       return {ids};
     }
@@ -333,18 +334,29 @@ struct cluster {
     auto leader_points = PointRange(Points, leaders);
 
     fanout = std::min<int>(fanout, (int) num_leaders);
-
-
+    // if (depth == 0) fanout = 6;
+    // if (depth == 1) fanout = std::min<int>(3, (int) num_leaders);
+    // if (depth == 2) fanout = std::min<int>(2, (int) num_leaders);
     parlay::internal::timer t;
     t.start();
     parlay::sequence<std::pair<uint32_t, uint32_t>> flat(ids.size() * fanout);
-    parlay::parallel_for(0, ids.size(), [&](size_t i) {
-      uint32_t point_id = ids[i];
-      auto cl = closest_leaders(Points, leader_points, point_id, fanout);
-      for (int j = 0; j < fanout; ++j) {
-        flat[i * fanout + j] = std::make_pair(cl[j].first, point_id);
+    if (ids.size() < granularity) {
+      for (size_t i = 0; i < ids.size(); i++) {
+        uint32_t point_id = ids[i];
+        auto cl = closest_leaders(Points, leader_points, point_id, fanout);
+        for (int j = 0; j < fanout; ++j) {
+          flat[i * fanout + j] = std::make_pair(cl[j].first, point_id);
+        }
       }
-    });
+    } else{
+      parlay::parallel_for(0, ids.size(), [&](size_t i) {
+        uint32_t point_id = ids[i];
+        auto cl = closest_leaders(Points, leader_points, point_id, fanout);
+        for (int j = 0; j < fanout; ++j) {
+          flat[i * fanout + j] = std::make_pair(cl[j].first, point_id);
+        }
+      });
+    }
     parlay::sequence<Bucket> clusters = parlay::group_by_index(flat, leaders.size());
     if (depth == 0) {
       t.next("first level assign time");
@@ -387,7 +399,9 @@ struct cluster {
         clusters.pop_back();
       }
       //deduplicate the new bucket 
-      new_bucket = parlay::remove_duplicates(new_bucket);
+      //new_bucket = parlay::remove_duplicates(new_bucket);
+
+      std::unordered_set<uint32_t> seen;
       
       buckets.push_back(std::move(new_bucket));
     }
@@ -656,7 +670,8 @@ struct cluster {
   }
 
   size_t SEED = 555;
-  double FRACTION_LEADERS = 0.005;
+  //double FRACTION_LEADERS = 0.005;
+  double FRACTION_LEADERS = 0.0005;
   size_t TOP_LEVEL_NUM_LEADERS = 950;
   size_t MAX_NUM_LEADERS = 1500;
   size_t MAX_CLUSTER_SIZE = 5000;

@@ -59,10 +59,12 @@ void ANN(Graph<indexType> &G, long k, BuildParams &BP,
   long prune_degree = P.getOptionLongValue("-prune_degree", std::numeric_limits<long>::max());
   //int fanout = P.getOptionIntValue("-fanout", 1);
   int fanout_per_level = P.getOptionIntValue("-fanout_per_level", 0);
+  double fraction_leaders = P.getOptionDoubleValue("-fraction_leaders", 0.0005);
+  std::string fanout_scheme = P.getOptionValue("-fanout_scheme", "");
   double idx_time;
   if(!graph_built){
     findex I;
-    I.build_index(G, Points, BP.num_clusters, BP.cluster_size, BP.MST_deg, multi_pivot, prune, prune_all, alpha, leaf_method, prune_degree, vamana_long_range, top_level_pct, top_level_leaders, BP.fanout, fanout_per_level);
+    I.build_index(G, Points, BP.num_clusters, BP.cluster_size, BP.MST_deg, multi_pivot, prune, prune_all, alpha, leaf_method, prune_degree, vamana_long_range, top_level_pct, top_level_leaders, BP.fanout, fanout_per_level,fraction_leaders, fanout_scheme);
     idx_time = t.next_time();
   } else{idx_time=0;}
   std::string name = "NavHCNNG";

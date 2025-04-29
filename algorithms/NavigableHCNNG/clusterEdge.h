@@ -310,7 +310,7 @@ struct cluster {
   // Returns a collection of leaf buckets.
   std::vector<Bucket> RecursivelySketch(PR &Points, Bucket &ids,
                                         long cluster_size, int depth,
-                                        int fanout, size_t seed, int fanout_levels) {
+                                        int fanout, size_t seed, int fanout_levels, std::vector<int> &fanout_scheme) {
     int granularity = 5000;
     if (ids.size() <= cluster_size) {
       return {ids};
@@ -332,8 +332,8 @@ struct cluster {
     //		std::cout << "after sampling: leaders size " << leaders.size()
     //<< std::endl;
     auto leader_points = PointRange(Points, leaders);
-
-    fanout = std::min<int>(fanout, (int) num_leaders);
+    (depth < fanout_scheme.size()) ? fanout = fanout_scheme[depth] : std::min<int>(fanout, (int) num_leaders);
+    //fanout = std::min<int>(fanout, (int) num_leaders);
     // if (depth == 0) fanout = 6;
     // if (depth == 1) fanout = std::min<int>(3, (int) num_leaders);
     // if (depth == 2) fanout = std::min<int>(2, (int) num_leaders);
@@ -399,9 +399,9 @@ struct cluster {
         clusters.pop_back();
       }
       //deduplicate the new bucket 
-      //new_bucket = parlay::remove_duplicates(new_bucket);
+      new_bucket = parlay::remove_duplicates(new_bucket);
 
-      std::unordered_set<uint32_t> seen;
+      //std::unordered_set<uint32_t> seen;
       
       buckets.push_back(std::move(new_bucket));
     }
@@ -436,7 +436,7 @@ struct cluster {
             // The normal case
             recursive_buckets = RecursivelySketch(
                 Points, clusters[cluster_id], cluster_size, depth + 1,
-                /*fanout=*/local_fanout, next_seed + cluster_id, fanout_levels);
+                /*fanout=*/local_fanout, next_seed + cluster_id, fanout_levels, fanout_scheme);
           }
           rec_buckets[cluster_id] = std::move(recursive_buckets);
         },
@@ -484,7 +484,7 @@ struct cluster {
 
     t.start();
     auto buckets =
-        RecursivelySketch(Points, ids, cluster_size, 0, local_fanout, SEED, fanout_levels);
+        RecursivelySketch(Points, ids, cluster_size, 0, local_fanout, SEED, fanout_levels, FANOUT_SCHEME);
     SEED = parlay::hash64(SEED);
     t.next("buckets time");
     std::cout << "Computed buckets!" << std::endl;
@@ -690,6 +690,8 @@ struct cluster {
 
   // 0 = all at the top level; 1 = n, n -1, ... 1 
   int PIVOT_STRAT = 0;
+
+  std::vector<int> FANOUT_SCHEME = {};
 
   // Horrible hacks. Fix.
   SpinLock lock;

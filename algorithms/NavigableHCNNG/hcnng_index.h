@@ -115,7 +115,7 @@ struct hcnng_index {
 
   void build_index(GraphI &G, PR &Points, long cluster_rounds,
                    long cluster_size, long MSTDeg, bool multi_pivot, bool prune, bool prune_all, double alpha,
-                   std::string leaf_method, long prune_degree, bool vamana_long_range, double top_level_pct, long top_level_leaders, int fanout, int fanout_per_level) {
+                   std::string leaf_method, long prune_degree, bool vamana_long_range, double top_level_pct, long top_level_leaders, int fanout, int fanout_per_level, double fraction_leaders, std::string fanout_scheme) {
     cluster<Point, PointRange, indexType> C;
     C.START_POINTS.push_back(0);
     C.MST_DEG = MSTDeg;
@@ -129,9 +129,24 @@ struct hcnng_index {
     C.LEAF_ALG = leaf_method;
     C.FANOUT = fanout;
     C.FANOUT_PER_LEVEL = fanout_per_level;
-
+    C.FRACTION_LEADERS = fraction_leaders;
+    
+    //parse fanout_scheme which will be something like "10,5,2,1" into a vector of ints
+    if (fanout_scheme != "") {
+      std::stringstream ss(fanout_scheme);
+      std::string token;
+      while (std::getline(ss, token, ',')) {
+        C.FANOUT_SCHEME.push_back(std::stoi(token));
+      }
+    }
+    // print out the fanout scheme
+    std::cout << "Fanout scheme: ";
+    for (size_t i = 0; i < C.FANOUT_SCHEME.size(); i++) {
+      std::cout << C.FANOUT_SCHEME[i] << " ";
+    }
+    std::cout << std::endl;
+    
     C.multiple_clustertrees(G, Points, cluster_size, cluster_rounds);
-
     if (vamana_long_range) {
       std::cout << "Total start points = " << C.START_POINTS.size() << std::endl;
       std::cout << "Adding long range edges using Vamana" << std::endl;

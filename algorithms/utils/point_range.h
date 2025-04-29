@@ -28,6 +28,7 @@
 
 #include "parlay/parallel.h"
 #include "parlay/primitives.h"
+#include "parlay/alloc.h"
 #include "parlay/internal/file_map.h"
 #include "types.h"
 
@@ -73,11 +74,17 @@ struct PointRange{
     n = indices.size();
     aligned_bytes = pr.aligned_bytes;
     long total_bytes = n * aligned_bytes;
-    constexpr size_t ALIGNMENT = 1L << 21;
-    // total_bytes = (total_bytes + ALIGNMENT - 1) & ~(ALIGNMENT - 1);
-    byte* ptr = (byte*) aligned_alloc(ALIGNMENT, total_bytes);
-    // madvise(ptr, total_bytes, MADV_HUGEPAGE);
-    values = std::shared_ptr<byte[]>(ptr, std::free);
+    if (total_bytes >= 1L << 20) {
+      constexpr size_t ALIGNMENT = 1L << 21;
+      total_bytes = (total_bytes + ALIGNMENT - 1) & ~(ALIGNMENT - 1);
+      byte* ptr = (byte*) aligned_alloc(ALIGNMENT, total_bytes);
+      madvise(ptr, total_bytes, MADV_HUGEPAGE);
+      values = std::shared_ptr<byte[]>(ptr, std::free);
+    }
+    else {
+      byte* ptr = (byte*) parlay::p_malloc(total_bytes);
+      values = std::shared_ptr<byte[]>(ptr, parlay::p_free);
+    }
     byte* vptr = values.get();
     for (size_t i=0; i < indices.size(); ++i) {
       size_t index = indices[i];

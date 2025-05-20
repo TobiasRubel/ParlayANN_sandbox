@@ -14,4 +14,6 @@ output/
 *.fbin
 *.ibin
 *.log
+*.csr
+*.png
 algorithms/scripts/*

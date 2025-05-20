@@ -15,4 +15,5 @@ output/
 *.ibin
 *.log
 *.csr
+*.png
 algorithms/scripts/*

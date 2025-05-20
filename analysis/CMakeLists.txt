@@ -7,6 +7,7 @@ set(TEST_FILES
 	deleting_central_edges.cpp
 	prune_neighborhood.cpp
 	unbounded_all_prune.cpp
+	local_shortest_paths.cpp
 )
 
 foreach(TEST_FILE ${TEST_FILES})
